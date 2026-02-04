@@ -1,0 +1,17 @@
+out
+dist
+node_modules
+.vscode-test
+.ds_store
+*.vsix
+.gemini
+.ai-agent
+# Webview
+webview-ui/node_modules
+webview-ui/dist
+webview-ui/build
+# Logs
+*.log
+# OS
+.DS_Store
+Thumbs.db

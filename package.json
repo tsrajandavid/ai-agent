@@ -1,0 +1,92 @@
+{
+  "name": "ai-agent",
+  "version": "1.0.0",
+  "description": "",
+  "displayName": "AI Coding Agent",
+  "publisher": "ai-agent",
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "node esbuild.js --production",
+    "watch": "node esbuild.js --watch",
+    "package": "vsce package",
+    "lint": "eslint src --ext ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tsrajandavid/ai-agent.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/tsrajandavid/ai-agent/issues"
+  },
+  "homepage": "https://github.com/tsrajandavid/ai-agent#readme",
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ai-agent-sidebar",
+          "title": "AI Agent",
+          "icon": "$(hubot)"
+        }
+      ]
+    },
+    "views": {
+      "ai-agent-sidebar": [
+        {
+          "type": "webview",
+          "id": "ai-agent.chatView",
+          "name": "AI Agent Chat"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "ai-agent.openChat",
+        "title": "Open AI Chat"
+      },
+      {
+        "command": "ai-agent.setApiKey",
+        "title": "Set AI Agent API Key"
+      },
+      {
+        "command": "ai-agent.createSnapshot",
+        "title": "Create Project Snapshot"
+      }
+    ],
+    "configuration": {
+      "title": "AI Agent",
+      "properties": {
+        "ai-agent.defaultModel": {
+          "type": "string",
+          "default": "google/gemini-2.0-flash-001",
+          "description": "Default model to use for AI Agent (OpenRouter model ID)"
+        }
+      }
+    }
+  },
+  "engines": {
+    "vscode": "^1.104.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "dependencies": {
+    "fast-glob": "^3.3.3",
+    "ignore": "^7.0.5",
+    "openai": "^6.17.0",
+    "simple-git": "^3.30.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.0",
+    "@types/vscode": "^1.104.0",
+    "@types/vscode-webview": "^1.57.5",
+    "esbuild": "^0.27.2",
+    "typescript": "^5.9.3"
+  }
+}
