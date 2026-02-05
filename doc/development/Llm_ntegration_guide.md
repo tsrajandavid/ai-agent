@@ -18,6 +18,44 @@ This guide covers integrating LLMs into your VS Code extension using OpenRouter.
 
 ---
 
+## Local LLM Support (Ollama) 🦙
+
+You can also run models locally using **Ollama**. This is great for privacy, offline development, and saving costs.
+
+### Setup
+
+1.  **Install Ollama**: Download from [ollama.com](https://ollama.com).
+2.  **Pull a Model**:
+    ```bash
+    ollama pull qwen2.5-coder:3b
+    ```
+3.  **Start Server**: Ensure Ollama is running (default port `11434`).
+
+### Integration
+
+The extension detects "Local" models by name.
+- **Model Name**: `Qwen 2.5 Coder 3B (Local)`
+- **Mapping**: The `LLMService` maps this to `qwen2.5-coder:3b` and directs requests to `http://localhost:11434`.
+
+### Code Example
+
+```typescript
+// src/llm/llm-service.ts
+
+private getProvider(modelName: string) {
+    if (modelName.includes("(Local)")) {
+        return new OpenAI({
+            baseURL: 'http://localhost:11434/v1', // Ollama's OpenAI-compatible endpoint
+            apiKey: 'ollama', // Required but ignored
+            dangerouslyAllowBrowser: true 
+        });
+    }
+    // ... OpenRouter fallback
+}
+```
+
+---
+
 ## Setup
 
 ### 1. Install Package

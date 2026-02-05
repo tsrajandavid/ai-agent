@@ -109,8 +109,10 @@ ai-agent/
 
 ### Configuring LLM
 - The LLM logic resides in `src/llm/llm-service.ts`.
-- It currently connects to **OpenRouter**.
-- API Key is stored securely via `vscode.SecretStorage`.
+- It supports:
+  - **OpenRouter**: Access to Claude, GPT-4, etc. (Requires API key).
+  - **Local Ollama**: Run models like `qwen2.5-coder` locally (Free, no key needed).
+- API Key for OpenRouter is stored securely via `vscode.SecretStorage`.
 
 ---
 

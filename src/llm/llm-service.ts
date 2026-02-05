@@ -43,11 +43,18 @@ export class LLMService {
         }
     }
 
+    public resetContext() {
+        // This method is intended to reset any internal state related to conversation context.
+        // For now, the LLMService itself doesn't maintain conversation history,
+        // so this method can be empty or log a message.
+        console.log('[LLM Service] resetContext called. No internal context to reset.');
+    }
+
     public async sendRequest(messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[], onChunk?: (chunk: string) => void): Promise<string> {
         console.log('[LLM Service] sendRequest called, model:', this.model);
 
         // Handle Local Ollama Case
-        if (this.model === "Qwen 2.5 Coder 3B (Local)") {
+        if (this.model === "qwen2.5-coder:3b" || this.model.includes("(Local)")) {
             console.log('[LLM Service] Using local Ollama...');
             const ollama = new OpenAI({
                 baseURL: 'http://localhost:11434/v1',
@@ -107,19 +114,17 @@ export class LLMService {
         }
     }
 
-    public setModel(modelName: string) {
-        const modelMap: { [key: string]: string } = {
-            "Gemini 3 Pro (High)": "google/gemini-2.0-pro-exp-02-05",
-            "Gemini 3 Pro (Low)": "google/gemini-2.0-pro-exp-02-05",
-            "Gemini 3 Flash": "google/gemini-2.0-flash-001",
-            "Claude Sonnet 4.5": "anthropic/claude-3.5-sonnet",
-            "Claude Sonnet 4.5 (Thinking)": "anthropic/claude-3.7-sonnet-thinking",
-            "Claude Opus 4.5 (Thinking)": "anthropic/claude-3-opus",
-            "GPT-OSS 120B (Medium)": "openai/gpt-4o",
-            "Qwen 2.5 Coder 3B (Local)": "Qwen 2.5 Coder 3B (Local)"
+    setModel(modelId: string) {
+        // Map user-friendly names to API IDs
+        const mapping: Record<string, string> = {
+            "Gemini 2.0 Flash (Fast)": "google/gemini-2.0-flash-001",
+            "Gemini 3 Pro (High)": "google/gemini-pro-1.5",
+            "Claude 3.5 Sonnet (Coding)": "anthropic/claude-3.5-sonnet",
+            "DeepSeek R1 (Reasoning)": "deepseek/deepseek-r1",
+            "Qwen 2.5 Coder 3B (Local)": "qwen2.5-coder:3b" // Local Ollama
         };
 
-        this.model = modelMap[modelName] || modelName;
-        console.log(`Model set to: ${this.model} (from ${modelName})`);
+        this.model = mapping[modelId] || modelId;
+        console.log(`[LLMService] Set model to: ${this.model}`);
     }
 }

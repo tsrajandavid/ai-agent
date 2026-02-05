@@ -58,6 +58,10 @@
       {
         "command": "ai-agent.createSnapshot",
         "title": "Create Project Snapshot"
+      },
+      {
+        "command": "ai-agent.refreshTools",
+        "title": "AI Agent: Refresh Tools"
       }
     ],
     "configuration": {

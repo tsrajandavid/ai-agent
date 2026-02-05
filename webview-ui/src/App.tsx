@@ -260,14 +260,167 @@ const ThinkingIndicator = () => (
 );
 
 /* ============================================
+   TOOL MESSAGE COMPONENT
+   ============================================ */
+interface ToolMessageProps {
+  tool: string;
+  result?: string;
+  isCall?: boolean;
+}
+
+const ToolMessage = ({ tool, result, isCall }: ToolMessageProps) => {
+  const [expanded, setExpanded] = useState(!isCall);
+
+  return (
+    <div className="message tool">
+      <div className="message-wrapper">
+        <div className="message-avatar tool-avatar">🔧</div>
+        <div className="message-body">
+          <div className="tool-header" onClick={() => setExpanded(!expanded)}>
+            <span className="tool-name">
+              {isCall ? `Using ${tool}...` : `${tool} result`}
+            </span>
+            <ChevronIcon isOpen={expanded} />
+          </div>
+          {expanded && result && (
+            <div className="tool-content">
+              <pre><code>{result}</code></pre>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ============================================
+   APPROVAL REQUEST COMPONENT
+   ============================================ */
+interface ApprovalRequestProps {
+  tool: string;
+  filePath: string;
+  oldContent?: string;
+  newContent?: string;
+  oldString?: string;
+  newString?: string;
+  onApprove: () => void;
+  onReject: () => void;
+}
+
+const ApprovalRequest = ({
+  tool,
+  filePath,
+  oldContent,
+  newContent,
+  oldString,
+  newString,
+  onApprove,
+  onReject
+}: ApprovalRequestProps) => {
+  const [showDiff, setShowDiff] = useState(true);
+
+  // Determine what to show
+  const isEdit = tool === 'edit_file';
+  const isNewFile = !oldContent || oldContent.trim() === '';
+
+  // Get display content
+  const displayOld = isEdit ? oldString : oldContent;
+  const displayNew = isEdit ? newString : newContent;
+
+  // Get file extension for syntax hint
+  const ext = filePath.split('.').pop() || '';
+
+  return (
+    <div className="message approval">
+      <div className="message-wrapper">
+        <div className="message-avatar approval-avatar">⚡</div>
+        <div className="message-body">
+          <div className="approval-header">
+            <span className="approval-title">
+              {isEdit ? 'Edit File' : isNewFile ? 'Create File' : 'Overwrite File'}
+            </span>
+            <span className="approval-path">{filePath}</span>
+          </div>
+
+          <div className="approval-diff-container">
+            <div className="diff-toolbar">
+              <button
+                className={`diff-tab ${showDiff ? 'active' : ''}`}
+                onClick={() => setShowDiff(true)}
+              >
+                Changes
+              </button>
+              <button
+                className={`diff-tab ${!showDiff ? 'active' : ''}`}
+                onClick={() => setShowDiff(false)}
+              >
+                Preview
+              </button>
+              <span className="diff-file-type">{ext.toUpperCase()}</span>
+            </div>
+
+            {showDiff ? (
+              <div className="diff-view">
+                {displayOld && (
+                  <div className="diff-section removed">
+                    <div className="diff-label">- Removed</div>
+                    <pre><code>{displayOld}</code></pre>
+                  </div>
+                )}
+                {displayNew && (
+                  <div className="diff-section added">
+                    <div className="diff-label">+ Added</div>
+                    <pre><code>{displayNew}</code></pre>
+                  </div>
+                )}
+                {!displayOld && !displayNew && (
+                  <div className="diff-empty">No changes to preview</div>
+                )}
+              </div>
+            ) : (
+              <div className="preview-view">
+                <pre><code>{displayNew || newContent || ''}</code></pre>
+              </div>
+            )}
+          </div>
+
+          <div className="approval-actions">
+            <button className="approval-btn reject" onClick={onReject}>
+              ✕ Reject
+            </button>
+            <button className="approval-btn accept" onClick={onApprove}>
+              ✓ Accept
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ============================================
    MESSAGE COMPONENT
    ============================================ */
 interface MessageProps {
-  role: 'user' | 'system';
+  role: 'user' | 'system' | 'tool';
   text: string;
+  command?: string;
+  tool?: string;
+  result?: string;
 }
 
-const Message = ({ role, text }: MessageProps) => {
+const Message = ({ role, text, command, tool, result }: MessageProps) => {
+  // Handle tool messages
+  if (role === 'tool' || command === 'tool-call' || command === 'tool-result') {
+    return (
+      <ToolMessage
+        tool={tool || 'unknown'}
+        result={result || text}
+        isCall={command === 'tool-call'}
+      />
+    );
+  }
+
   const isUser = role === 'user';
 
   return (
@@ -367,14 +520,96 @@ const ContextMenu = ({ isOpen, onClose }: ContextMenuProps) => {
 };
 
 /* ============================================
+   FILE AUTOCOMPLETE COMPONENT
+   ============================================ */
+interface FileListProps {
+  files: string[];
+  visible: boolean;
+  filter: string;
+  onSelect: (file: string) => void;
+}
+
+const getFileIcon = (filename: string) => {
+  const ext = filename.split('.').pop()?.toLowerCase();
+  switch (ext) {
+    case 'ts':
+    case 'tsx': return <span style={{ color: '#3178c6' }}>TS</span>;
+    case 'js':
+    case 'jsx': return <span style={{ color: '#f1e05a' }}>JS</span>;
+    case 'css': return <span style={{ color: '#563d7c' }}>#</span>;
+    case 'json': return <span style={{ color: '#e34c26' }}>{ }</span>;
+    case 'md': return <span style={{ color: '#008ba3' }}>M↓</span>;
+    case 'html': return <span style={{ color: '#e34c26' }}>&lt;&gt;</span>;
+    default: return <span>📄</span>;
+  }
+};
+
+const FileAutocomplete = ({ files, visible, filter, onSelect }: FileListProps) => {
+  if (!visible) return null;
+
+  // Filter files
+  const filtered = files.filter(f => f.toLowerCase().includes(filter.toLowerCase())).slice(0, 8);
+
+  return (
+    <div className="file-autocomplete">
+      <div className="context-menu-header">
+        <span>Code Context Items</span>
+        <span className="arrow">→</span>
+      </div>
+
+      {/* Categories (Static for now to match UI look) */}
+      {!filter && (
+        <>
+          <div className="context-category">
+            <span className="cat-icon">📁</span> Files
+          </div>
+          <div className="context-category">
+            <span className="cat-icon">📂</span> Directories
+          </div>
+        </>
+      )}
+
+      {/* Filtered Files */}
+      {filtered.length > 0 ? (
+        <div className="file-list-section">
+          {filtered.map((file, idx) => (
+            <div key={idx} className="autocomplete-item" onClick={() => onSelect(file)}>
+              <div className="file-icon-wrapper">{getFileIcon(file)}</div>
+              <span className="file-name">{file}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="autocomplete-empty">No matching files</div>
+      )}
+    </div>
+  );
+};
+
+/* ============================================
    MAIN APP COMPONENT
    ============================================ */
 function App() {
-  const { postMessage, messages, streamingContent } = useVSCode();
+  const { postMessage, messages, setMessages, streamingContent, setStreamingContent } = useVSCode();
   const [inputValue, setInputValue] = useState("");
   const [mode, setMode] = useState(MODES[0]);
   const [isLoading, setIsLoading] = useState(false);
   const [showContext, setShowContext] = useState(false);
+
+  // File Autocomplete State
+  const [files, setFiles] = useState<string[]>([]);
+  const [showFilePicker, setShowFilePicker] = useState(false);
+  const [fileFilter, setFileFilter] = useState("");
+
+  // Approval State
+  const [pendingApproval, setPendingApproval] = useState<{
+    tool: string;
+    filePath: string;
+    oldContent?: string;
+    newContent?: string;
+    oldString?: string;
+    newString?: string;
+  } | null>(null);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -384,17 +619,95 @@ function App() {
     postMessage("setModel", DEFAULT_MODEL);
   }, []);
 
-  // Handle response completion
+  // Handle response completion and other commands
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       const message = event.data;
+      console.log('[AI Agent UI] Received message:', message.command, message);
+
       if (message.command === 'response-complete' || message.command === 'error') {
         setIsLoading(false);
       }
+      if (message.command === 'clear-chat') {
+        setMessages([]);
+        setStreamingContent("");
+        setIsLoading(false);
+        postMessage("clear-history", "");
+      }
+      if (message.command === 'update-file-list') {
+        console.log('[AI Agent UI] Received file list:', message.files?.length);
+        setFiles(message.files || []);
+      }
+      if (message.command === 'approval-request') {
+        console.log('[AI Agent UI] Approval request received:', message);
+        setPendingApproval({
+          tool: message.tool,
+          filePath: message.filePath,
+          oldContent: message.oldContent,
+          newContent: message.newContent,
+          oldString: message.oldString,
+          newString: message.newString
+        });
+      }
+      if (message.command === 'restore-history') {
+        console.log('[AI Agent UI] Restoring history:', message.messages?.length, 'messages');
+        if (message.messages && Array.isArray(message.messages)) {
+          setMessages(message.messages);
+        }
+      }
     };
     window.addEventListener('message', handleMessage);
+
+    // Request initial file list
+    postMessage("refresh-files", "");
+
     return () => window.removeEventListener('message', handleMessage);
   }, []);
+
+  // Handle Input Change for Autocomplete
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setInputValue(val);
+
+    // Check for @mention
+    const match = val.match(/@([\w/.-]*)$/);
+    if (match) {
+      setShowFilePicker(true);
+      setFileFilter(match[1]);
+    } else {
+      setShowFilePicker(false);
+    }
+  };
+
+  const handleFileSelect = (file: string) => {
+    // Replace @filter with /add file
+    // Or just insert the file path? 
+    // User wants context management. Let's convert to slash command or just insert path?
+    // Let's insert `/add <path> `
+    const match = inputValue.match(/@([\w/.-]*)$/);
+    if (match) {
+      const prefix = inputValue.substring(0, match.index);
+      // If strictly at start, replace with command. Else just text? 
+      // The user asked for "Context Management".
+      // Let's replace with `/add ${file}` only if text is empty?
+      // Actually, inserting `/add path` at cursor is weird if there's other text.
+      // Let's assume user starts with @ or types it.
+      // Simplest: replace `@partial` with `/add ${file}` if it's the only thing, or just the path if inline.
+      // But `/add` triggers the backend logic.
+
+      // Let's try: Replace with `/add ${file}` and clear the rest if it's the start.
+      // Or just append ` ${file} `?
+      // Wait, existing implementation requires `/add <path>`.
+      // So if I replace `@...` with `/add file`, it works.
+
+      const newValue = prefix + `/add ${file} `;
+      setInputValue(newValue);
+      setShowFilePicker(false);
+
+      // Focus back
+      textareaRef.current?.focus();
+    }
+  };
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -415,10 +728,13 @@ function App() {
       if (showContext && !(e.target as Element).closest('.context-menu-container')) {
         setShowContext(false);
       }
+      if (showFilePicker && !(e.target as Element).closest('.file-autocomplete')) {
+        setShowFilePicker(false);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showContext]);
+  }, [showContext, showFilePicker]);
 
   const handleModeSelect = useCallback((newMode: typeof MODES[0]) => {
     setMode(newMode);
@@ -440,9 +756,22 @@ function App() {
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
+      // If picker is open, select first? Nah, just close
+      if (showFilePicker) return;
       handleSend();
     }
-  }, [handleSend]);
+  }, [handleSend, showFilePicker]);
+
+  // Approval handlers
+  const handleApprove = useCallback(() => {
+    postMessage("approval-response", JSON.stringify({ approved: true }));
+    setPendingApproval(null);
+  }, [postMessage]);
+
+  const handleReject = useCallback(() => {
+    postMessage("approval-response", JSON.stringify({ approved: false }));
+    setPendingApproval(null);
+  }, [postMessage]);
 
   return (
     <div className="app-container">
@@ -459,8 +788,11 @@ function App() {
               {messages.map((msg, index) => (
                 <Message
                   key={index}
-                  role={msg.role as 'user' | 'system'}
-                  text={msg.text || JSON.stringify(msg)}
+                  role={msg.role as 'user' | 'system' | 'tool'}
+                  text={msg.text || ''}
+                  command={msg.command}
+                  tool={msg.tool}
+                  result={msg.result}
                 />
               ))}
             </>
@@ -472,7 +804,21 @@ function App() {
           )}
 
           {/* Thinking indicator */}
-          {isLoading && !streamingContent && <ThinkingIndicator />}
+          {isLoading && !streamingContent && !pendingApproval && <ThinkingIndicator />}
+
+          {/* Approval Request */}
+          {pendingApproval && (
+            <ApprovalRequest
+              tool={pendingApproval.tool}
+              filePath={pendingApproval.filePath}
+              oldContent={pendingApproval.oldContent}
+              newContent={pendingApproval.newContent}
+              oldString={pendingApproval.oldString}
+              newString={pendingApproval.newString}
+              onApprove={handleApprove}
+              onReject={handleReject}
+            />
+          )}
 
           <div ref={chatEndRef} />
         </div>
@@ -481,13 +827,21 @@ function App() {
       {/* Input Container */}
       <div className="input-wrapper">
         <div className="input-container">
+
+          <FileAutocomplete
+            files={files}
+            visible={showFilePicker}
+            filter={fileFilter}
+            onSelect={handleFileSelect}
+          />
+
           <textarea
             ref={textareaRef}
             className="chat-input"
             value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
+            onChange={handleInputChange}
             onKeyDown={handleKeyDown}
-            placeholder="Ask anything... (Enter to send, Shift+Enter for new line)"
+            placeholder="Ask anything... (Use @ to add context)"
             rows={1}
             disabled={isLoading}
           />
