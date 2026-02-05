@@ -1,4 +1,3 @@
-import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Tool } from './tool-interface';
@@ -16,9 +15,16 @@ export class ReadFileTool implements Tool {
 
     constructor(private workspaceRoot: string) { }
 
-    async execute(relativePath: string): Promise<string> {
+    async execute(args: any): Promise<string> {
         try {
-            const fullPath = path.resolve(this.workspaceRoot, relativePath.trim());
+            // Handle both string and object args
+            const relativePath = (typeof args === 'string' ? args : args?.path || '').trim();
+
+            if (!relativePath) {
+                return 'Error: Missing file path';
+            }
+
+            const fullPath = path.resolve(this.workspaceRoot, relativePath);
 
             // Security check: ensure path is within workspace
             if (!fullPath.startsWith(this.workspaceRoot)) {
@@ -50,9 +56,16 @@ export class ListDirTool implements Tool {
 
     constructor(private workspaceRoot: string) { }
 
-    async execute(relativePath: string): Promise<string> {
+    async execute(args: any): Promise<string> {
         try {
-            const fullPath = path.resolve(this.workspaceRoot, relativePath.trim());
+            // Handle both string and object args
+            const relativePath = (typeof args === 'string' ? args : args?.path || '').trim();
+
+            if (!relativePath) {
+                return 'Error: Missing directory path';
+            }
+
+            const fullPath = path.resolve(this.workspaceRoot, relativePath);
 
             if (!fullPath.startsWith(this.workspaceRoot)) {
                 return `Error: Access denied.`;

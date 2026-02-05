@@ -47,9 +47,11 @@ npm run watch
 Open a **second terminal** (`Ctrl+Shift+5` split) and run:
 ```bash
 cd webview-ui
-npx vite build --watch
+npm run watch
 ```
 *Builds React files in `webview-ui/src/` to `webview-ui/build/` on change.*
+
+> **Tip**: You can also run `Tasks: Run Task` → `npm: watch - webview-ui` from the Command Palette.
 
 ### 2. Launch Extension
 1.  Press **F5** (or go to *Run and Debug* -> *Run Extension*).
@@ -102,7 +104,7 @@ ai-agent/
 
 ### Modifying the Chat UI
 1.  Edit files in `webview-ui/src/`.
-2.  Ensure `npx vite build --watch` is running.
+2.  Ensure `npm run watch` is running in the `webview-ui` folder.
 3.  Reload the Extension Host window (`Ctrl+R`) to see changes.
 
 ### Configuring LLM

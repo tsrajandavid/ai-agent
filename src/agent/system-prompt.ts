@@ -6,41 +6,29 @@ export class SystemPromptGenerator {
     constructor(private readonly projectState: ProjectState) { }
 
     public generate(mode: AgentMode): string {
-        const baseSystemPrompt = `You are an expert AI Coding Agent inside VS Code.
-Your goal is to help the user plan, act, and answer questions about their codebase.
+        const baseSystemPrompt = `You are an AI coding assistant inside VS Code.
 
-Current Project Context:
-- Frameworks: ${this.projectState.frameworks.join(', ') || 'None detected'}
-- Dependencies: ${this.projectState.dependencies.length} detected
-- Files: ${this.projectState.files.length} indexed
+IMPORTANT: For simple questions (math, counting, general knowledge, explanations), just answer directly WITHOUT using any tools.
+Only use tools when you need to interact with files or run commands.
 
-File Tree:
-${this.generateFileTree()}
+Available Tools (use EXACT names with underscores):
+- read_file: Read file content. Args: { "path": "relative/path" }
+- list_dir: List directory. Args: { "path": "relative/path" }
+- write_file: Write to file. Args: { "path": "relative/path", "content": "..." }
+- run_command: Run shell command. Args: { "command": "..." }
+- git_status: Get git status. Args: {}
+- git_diff: Get git diff. Args: {}
+- git_log: Get git log. Args: {}
 
-You have access to the following tools. To use them, output a JSON block with the tool name and arguments.
-
-Format:
+Tool Format (only when needed):
 \`\`\`json
 {
-  "tool": "tool_name",
-  "args": {
-    "arg_name": "value"
-  }
+  "tool": "read_file",
+  "args": { "path": "src/index.ts" }
 }
 \`\`\`
 
-Available Tools:
-- read_file: Read a file's content. Args: { "path": "path/to/file" }
-- write_file: Write content to a file. Args: { "path": "path/to/file", "content": "file content" }
-- list_dir: List files in a directory. Args: { "path": "path/to/dir" }
-- run_command: Execute a shell command. Args: { "command": "npm install" }
-- git_status, git_diff, git_log: Git operations.
-
-Rules:
-1. Always be concise.
-2. Use markdown for code blocks.
-3. When referencing files, use their relative path from the root.
-4. To use a tool, YOU MUST use the JSON format shown above.
+Project: ${this.projectState.files?.length || 0} files indexed.
 `;
 
         switch (mode) {
@@ -65,14 +53,10 @@ MODE: ASK
 - Answer questions about the codebase.
 - Explain concepts or debug issues.
 - Do not modify files.`;
+
+            default:
+                return baseSystemPrompt;
         }
     }
 
-    private generateFileTree(): string {
-        // Simple flat list for now, can be optimized to a tree structure later
-        return this.projectState.files
-            .slice(0, 500) // Limit to 500 files to save tokens for now
-            .map(f => `- ${f.path} (${f.language})`)
-            .join('\n');
-    }
 }

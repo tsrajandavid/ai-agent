@@ -5,7 +5,6 @@ import { LLMService } from '../llm/llm-service';
 import { ProjectIndexer } from '../services/project-indexer';
 import { SystemPromptGenerator, AgentMode } from '../agent/system-prompt';
 import { ToolManager } from '../tools/tool-manager';
-import { ReadFileTool, ListDirTool, WriteFileTool } from '../tools/file-tools';
 
 interface WebviewMessage {
     command: string;
@@ -83,6 +82,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
                         this._currentMode = text as AgentMode;
                         vscode.window.showInformationMessage(`Switched to ${text} mode`);
                         return;
+                    case "setModel":
+                        this._llmService.setModel(text);
+                        vscode.window.showInformationMessage(`Switched to model: ${text}`);
+                        return;
                 }
             },
             undefined,
@@ -91,6 +94,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
 
     private async handleHelloCommand(text: string, webview: vscode.Webview) {
+        console.log('[AI Agent] handleHelloCommand called with:', text);
+
         // Echo user message
         webview.postMessage({
             command: "response",
@@ -98,22 +103,30 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             role: 'user'
         });
 
-        // 1. Get latest project state
-        let projectState: any = { files: [], frameworks: [] };
-        if (this._projectIndexer) {
-            projectState = await this._projectIndexer.scanFiles();
-        }
-
-        // 2. Generate System Prompt
-        const promptGenerator = new SystemPromptGenerator(projectState);
-        const systemPrompt = promptGenerator.generate(this._currentMode);
-
-        const messages = [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: text }
-        ] as any;
-
         try {
+            // 1. Get latest project state
+            console.log('[AI Agent] Getting project state...');
+            let projectState: any = { files: [], frameworks: [], dependencies: [] };
+            if (this._projectIndexer) {
+                try {
+                    projectState = await this._projectIndexer.scanFiles();
+                } catch (e) {
+                    console.error('[AI Agent] Failed to scan project files:', e);
+                }
+            }
+
+            // 2. Generate System Prompt
+            console.log('[AI Agent] Generating system prompt...');
+            const promptGenerator = new SystemPromptGenerator(projectState);
+            const systemPrompt = promptGenerator.generate(this._currentMode);
+
+            const messages = [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: text }
+            ] as any;
+
+            // 3. Send to LLM
+            console.log('[AI Agent] Sending request to LLM...');
             let fullResponse = "";
             await this._llmService.sendRequest(messages, (chunk) => {
                 fullResponse += chunk;
@@ -123,14 +136,17 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
                 });
             });
 
+            console.log('[AI Agent] LLM response complete, length:', fullResponse.length);
             webview.postMessage({
                 command: "response-complete",
-                text: fullResponse
+                text: fullResponse,
+                role: 'system'
             });
 
-            // 3. Tool Execution Logic
+            // 4. Tool Execution Logic
             const toolCommand = this._toolManager.parseCommand(fullResponse);
             if (toolCommand) {
+                console.log('[AI Agent] Executing tool:', toolCommand.command);
                 const toolOutput = await this._toolManager.executeTool(toolCommand.command, toolCommand.args);
 
                 // Send tool output to Webview
@@ -139,15 +155,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
                     text: `🛠️ **Tool Output (${toolCommand.command})**:\n\`\`\`\n${toolOutput}\n\`\`\``,
                     role: 'system'
                 });
-
-                // TODO: In a real agent loop, we would feed this back to the LLM
             }
 
         } catch (error) {
-            vscode.window.showErrorMessage(`LLM Error: ${error}`);
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error('[AI Agent] Error:', errorMessage, error);
+            vscode.window.showErrorMessage(`LLM Error: ${errorMessage}`);
             webview.postMessage({
                 command: "error",
-                text: `Error: ${error}`
+                text: `❌ Error: ${errorMessage}`,
+                role: 'system'
             });
         }
     }

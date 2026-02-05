@@ -9,15 +9,8 @@ const MODES = [
   { id: "ASK", label: "Asking", desc: "Agent will only answer questions. No tools or file system access." }
 ];
 
-const MODELS = [
-  "Gemini 3 Pro (High)",
-  "Gemini 3 Pro (Low)",
-  "Gemini 3 Flash",
-  "Claude Sonnet 4.5",
-  "Claude Sonnet 4.5 (Thinking)",
-  "Claude Opus 4.5 (Thinking)",
-  "GPT-OSS 120B (Medium)"
-];
+// Using Qwen local model only
+const DEFAULT_MODEL = "Qwen 2.5 Coder 3B (Local)";
 
 /* SVG Icons */
 const SendIcon = () => (
@@ -86,10 +79,32 @@ const Dropdown = ({ label, items, onSelect, type }: DropdownProps) => {
 };
 
 function App() {
-  const { postMessage, messages } = useVSCode();
+  const { postMessage, messages, streamingContent } = useVSCode();
   const [inputValue, setInputValue] = useState("");
   const [mode, setMode] = useState(MODES[0]); // Default to Planning
-  const [model, setModel] = useState(MODELS[0]);
+  const [isLoading, setIsLoading] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Set Qwen model on mount
+  useEffect(() => {
+    postMessage("setModel", DEFAULT_MODEL);
+  }, []);
+
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      const message = event.data;
+      if (message.command === 'response-complete' || message.command === 'error') {
+        setIsLoading(false);
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
+  // Auto-scroll to bottom
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, streamingContent, isLoading]);
 
   const handleModeSelect = (newMode: any) => {
     setMode(newMode);
@@ -98,6 +113,7 @@ function App() {
 
   const handleSend = () => {
     if (inputValue.trim()) {
+      setIsLoading(true);
       postMessage("hello", inputValue);
       setInputValue("");
     }
@@ -153,6 +169,15 @@ function App() {
             </div>
           ))
         )}
+        {/* Streaming Message Indicator */}
+        {(isLoading || streamingContent) && (
+          <div className="message system">
+            <div className="message-header">AI</div>
+            <div className="message-content">
+              {streamingContent ? streamingContent : "Thinking..."}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="input-container">
@@ -203,12 +228,7 @@ function App() {
               type="mode"
             />
 
-            <Dropdown
-              label={model}
-              items={MODELS}
-              onSelect={setModel}
-              type="model"
-            />
+            <span className="model-label">Qwen 3B</span>
 
           </div>
           <div className="input-actions-right">
@@ -218,7 +238,7 @@ function App() {
           </div>
         </div>
       </div>
-    </div>
+    </div >
   );
 }
 

@@ -4,8 +4,20 @@
         {
             "type": "npm",
             "script": "watch",
-            "problemMatcher": "$esbuild-watch",
+            "label": "npm: watch",
             "isBackground": true,
+            "problemMatcher": {
+                "owner": "esbuild",
+                "pattern": {
+                    "regexp": "^✘ \\[ERROR\\] (.+)$",
+                    "message": 1
+                },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": "^\\[watch\\] build started",
+                    "endsPattern": "^\\[watch\\] build finished"
+                }
+            },
             "presentation": {
                 "reveal": "never"
             },
@@ -20,6 +32,28 @@
             "problemMatcher": "$esbuild",
             "group": "build",
             "label": "npm: build"
+        },
+        {
+            "type": "npm",
+            "script": "watch",
+            "path": "webview-ui",
+            "label": "npm: watch - webview-ui",
+            "isBackground": true,
+            "problemMatcher": {
+                "owner": "vite",
+                "pattern": {
+                    "regexp": "^$"
+                },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": "^.*vite.*build started.*$",
+                    "endsPattern": "^.*built in.*$"
+                }
+            },
+            "presentation": {
+                "reveal": "silent"
+            },
+            "group": "build"
         }
     ]
 }

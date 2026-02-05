@@ -5,11 +5,16 @@ export class ToolManager {
     private tools: Map<string, Tool> = new Map();
 
     registerTool(tool: Tool) {
+        console.log(`[ToolManager] Registering tool: ${tool.name}`);
         this.tools.set(tool.name, tool);
     }
 
     getTool(name: string): Tool | undefined {
         return this.tools.get(name);
+    }
+
+    getRegisteredToolNames(): string[] {
+        return Array.from(this.tools.keys());
     }
 
     getToolsDescription(): string {
@@ -22,9 +27,13 @@ export class ToolManager {
     }
 
     async executeTool(command: string, args: any): Promise<string> {
+        console.log(`[ToolManager] executeTool called: ${command}`, args);
+        console.log(`[ToolManager] Available tools: ${this.getRegisteredToolNames().join(', ')}`);
+
         const tool = this.tools.get(command);
         if (!tool) {
-            return `Error: Tool '${command}' not found.`;
+            console.error(`[ToolManager] Tool '${command}' not found!`);
+            return `Error: Tool '${command}' not found. Available: ${this.getRegisteredToolNames().join(', ')}`;
         }
 
         // Validation

@@ -9,25 +9,64 @@ import { GitStatusTool, GitDiffTool, GitLogTool } from './tools/git-tools';
 import { SnapshotService } from './services/snapshot-service';
 
 let projectIndexer: ProjectIndexer | undefined;
+let toolManager: ToolManager;
+
+// Helper function to register all tools
+function registerTools(rootPath: string) {
+    console.log('[AI Agent] Registering tools with rootPath:', rootPath);
+    toolManager.registerTool(new ReadFileTool(rootPath));
+    toolManager.registerTool(new ListDirTool(rootPath));
+    toolManager.registerTool(new WriteFileTool(rootPath));
+    toolManager.registerTool(new RunCommandTool(rootPath));
+    toolManager.registerTool(new GitStatusTool(rootPath));
+    toolManager.registerTool(new GitDiffTool(rootPath));
+    toolManager.registerTool(new GitLogTool(rootPath));
+    console.log('[AI Agent] Registered tools:', toolManager.getRegisteredToolNames());
+}
 
 export async function activate(context: vscode.ExtensionContext) {
-    console.log('AI Agent activated!');
+    console.log('[AI Agent] Extension activating...');
 
-    // Initialize Indexer and Services
+    // Initialize Tool Manager first (tools will be registered when workspace is available)
+    toolManager = new ToolManager();
+
+    // Get workspace folder
     const workspaceFolders = vscode.workspace.workspaceFolders;
     let rootPath = "";
 
-    if (workspaceFolders) {
-        rootPath = workspaceFolders[0].uri.fsPath;
-        projectIndexer = new ProjectIndexer(rootPath);
-        await projectIndexer.initialize(); // Initialize watcher
+    console.log('[AI Agent] Workspace folders:', workspaceFolders?.map(f => f.uri.fsPath));
 
-        // Initial scan
-        console.log('Indexing project...');
+    if (workspaceFolders && workspaceFolders.length > 0) {
+        rootPath = workspaceFolders[0].uri.fsPath;
+        console.log('[AI Agent] Using rootPath:', rootPath);
+
+        // Register tools immediately
+        registerTools(rootPath);
+
+        // Initialize project indexer
+        projectIndexer = new ProjectIndexer(rootPath);
+        await projectIndexer.initialize();
+
+        console.log('[AI Agent] Indexing project...');
         const projectState = await projectIndexer.scanFiles();
-        console.log(`Indexed ${projectState.files.length} files.`);
-        console.log(`Detected Frameworks: ${projectState.frameworks.join(', ')}`);
+        console.log(`[AI Agent] Indexed ${projectState.files.length} files.`);
+        console.log(`[AI Agent] Detected Frameworks: ${projectState.frameworks.join(', ')}`);
+    } else {
+        console.warn('[AI Agent] No workspace folder open!');
+        vscode.window.showWarningMessage('AI Agent: Please open a folder to enable file tools.');
     }
+
+    // Listen for workspace folder changes (user opens a folder later)
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeWorkspaceFolders((event) => {
+            console.log('[AI Agent] Workspace folders changed:', event);
+            if (event.added.length > 0 && toolManager.getRegisteredToolNames().length === 0) {
+                const newRootPath = event.added[0].uri.fsPath;
+                registerTools(newRootPath);
+                vscode.window.showInformationMessage('AI Agent: Tools are now available!');
+            }
+        })
+    );
 
     // Initialize LLM Service
     const llmService = new LLMService(context);
@@ -65,18 +104,6 @@ export async function activate(context: vscode.ExtensionContext) {
             }
         })
     );
-
-    // Initialize Tools
-    const toolManager = new ToolManager();
-    if (rootPath) {
-        toolManager.registerTool(new ReadFileTool(rootPath));
-        toolManager.registerTool(new ListDirTool(rootPath));
-        toolManager.registerTool(new WriteFileTool(rootPath));
-        toolManager.registerTool(new RunCommandTool(rootPath));
-        toolManager.registerTool(new GitStatusTool(rootPath));
-        toolManager.registerTool(new GitDiffTool(rootPath));
-        toolManager.registerTool(new GitLogTool(rootPath));
-    }
 
     // Register Webview Provider (ALWAYS)
     const provider = new ChatPanelProvider(context.extensionUri, context, llmService, projectIndexer, toolManager);
