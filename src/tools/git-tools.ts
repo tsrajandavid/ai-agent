@@ -4,6 +4,11 @@ import simpleGit, { SimpleGit } from 'simple-git';
 export class GitStatusTool implements Tool {
     name = 'git_status';
     description = 'Get the status of the git repository.';
+    parameters = {
+        type: 'object',
+        properties: {},
+        required: []
+    };
     private git: SimpleGit;
 
     constructor(private workspaceRoot: string) {
@@ -23,6 +28,11 @@ export class GitStatusTool implements Tool {
 export class GitDiffTool implements Tool {
     name = 'git_diff';
     description = 'Get the diff of the git repository.';
+    parameters = {
+        type: 'object',
+        properties: {},
+        required: []
+    };
     private git: SimpleGit;
 
     constructor(private workspaceRoot: string) {
@@ -42,6 +52,13 @@ export class GitDiffTool implements Tool {
 export class GitLogTool implements Tool {
     name = 'git_log';
     description = 'Get the recent git log.';
+    parameters = {
+        type: 'object',
+        properties: {
+            count: { type: 'number', description: 'Number of commits to show (default: 10)' }
+        },
+        required: []
+    };
     private git: SimpleGit;
 
     constructor(private workspaceRoot: string) {

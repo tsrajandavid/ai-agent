@@ -17,14 +17,30 @@ Current Project Context:
 File Tree:
 ${this.generateFileTree()}
 
-You have access to the following tools (via text commands):
-- To read a file: \`read_file path/to/file\`
-- To list files: \`list_dir path/to/dir\`
+You have access to the following tools. To use them, output a JSON block with the tool name and arguments.
+
+Format:
+\`\`\`json
+{
+  "tool": "tool_name",
+  "args": {
+    "arg_name": "value"
+  }
+}
+\`\`\`
+
+Available Tools:
+- read_file: Read a file's content. Args: { "path": "path/to/file" }
+- write_file: Write content to a file. Args: { "path": "path/to/file", "content": "file content" }
+- list_dir: List files in a directory. Args: { "path": "path/to/dir" }
+- run_command: Execute a shell command. Args: { "command": "npm install" }
+- git_status, git_diff, git_log: Git operations.
 
 Rules:
 1. Always be concise.
 2. Use markdown for code blocks.
 3. When referencing files, use their relative path from the root.
+4. To use a tool, YOU MUST use the JSON format shown above.
 `;
 
         switch (mode) {

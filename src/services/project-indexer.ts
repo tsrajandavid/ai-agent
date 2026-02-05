@@ -19,6 +19,8 @@ export interface ProjectState {
 export class ProjectIndexer {
     private workspaceRoot: string;
     private ignoreManager = ignore();
+    private cache: ProjectState | null = null;
+    private watcher: vscode.FileSystemWatcher | undefined;
 
     constructor(workspaceRoot: string) {
         this.workspaceRoot = workspaceRoot;
@@ -26,6 +28,25 @@ export class ProjectIndexer {
 
     public async initialize(): Promise<void> {
         await this.loadGitignore();
+
+        // Setup watcher to invalidate cache on changes
+        // Watch for file creates, deletes, and changes
+        this.watcher = vscode.workspace.createFileSystemWatcher('**/*');
+        const invalidate = () => {
+            if (this.cache) {
+                console.log('ProjectIndexer: Cache invalidated');
+                this.cache = null;
+            }
+        };
+
+        this.watcher.onDidCreate(invalidate);
+        this.watcher.onDidDelete(invalidate);
+        this.watcher.onDidChange((uri) => {
+            // Only invalidate if we care about the file type (optimization)
+            // For now, just invalidate to be safe, or maybe just update that entry
+            // Simple approach: invalidate everything
+            invalidate();
+        });
     }
 
     private async loadGitignore(): Promise<void> {
@@ -37,6 +58,12 @@ export class ProjectIndexer {
     }
 
     public async scanFiles(): Promise<ProjectState> {
+        if (this.cache) {
+            console.log('ProjectIndexer: Using cached state');
+            return this.cache;
+        }
+
+        console.log('ProjectIndexer: Scanning files...');
         const entries = await fastGlob('**/*', {
             cwd: this.workspaceRoot,
             dot: true,
@@ -69,11 +96,13 @@ export class ProjectIndexer {
             }
         }
 
-        return {
+        this.cache = {
             files,
             dependencies,
             frameworks
         };
+
+        return this.cache;
     }
 
     private parsePackageJson(filePath: string): { dependencies: string[], frameworks: string[] } {
@@ -99,5 +128,9 @@ export class ProjectIndexer {
             console.error(`Failed to parse ${filePath}:`, e);
             return { dependencies: [], frameworks: [] };
         }
+    }
+
+    public dispose() {
+        this.watcher?.dispose();
     }
 }

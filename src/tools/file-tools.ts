@@ -6,6 +6,13 @@ import { Tool } from './tool-interface';
 export class ReadFileTool implements Tool {
     name = 'read_file';
     description = 'Read the contents of a file. Usage: read_file <path>';
+    parameters = {
+        type: 'object',
+        properties: {
+            path: { type: 'string', description: 'Relative path to the file' }
+        },
+        required: ['path']
+    };
 
     constructor(private workspaceRoot: string) { }
 
@@ -33,6 +40,13 @@ export class ReadFileTool implements Tool {
 export class ListDirTool implements Tool {
     name = 'list_dir';
     description = 'List files in a directory. Usage: list_dir <path>';
+    parameters = {
+        type: 'object',
+        properties: {
+            path: { type: 'string', description: 'Relative path to the directory' }
+        },
+        required: ['path']
+    };
 
     constructor(private workspaceRoot: string) { }
 
@@ -62,12 +76,28 @@ export class ListDirTool implements Tool {
 export class WriteFileTool implements Tool {
     name = 'write_file';
     description = 'Write content to a file. Usage: write_file <path> <content>';
+    parameters = {
+        type: 'object',
+        properties: {
+            path: { type: 'string', description: 'Relative path to the file' },
+            content: { type: 'string', description: 'Content to write' }
+        },
+        required: ['path', 'content']
+    };
+    requiresConfirmation = true;
 
     constructor(private workspaceRoot: string) { }
 
-    async execute(args: { path: string, content: string }): Promise<string> {
+    async execute(args: any): Promise<string> {
         try {
-            const relativePath = args.path.trim();
+            const rawPath = typeof args === 'string' ? args : args.path;
+            const content = typeof args === 'string' ? '' : args.content;
+
+            if (!rawPath || !content) {
+                return 'Error: Missing path or content';
+            }
+
+            const relativePath = rawPath.trim();
             const fullPath = path.resolve(this.workspaceRoot, relativePath);
 
             if (!fullPath.startsWith(this.workspaceRoot)) {

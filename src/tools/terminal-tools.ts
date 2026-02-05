@@ -7,11 +7,22 @@ const exec = util.promisify(cp.exec);
 export class RunCommandTool implements Tool {
     name = 'run_command';
     description = 'Execute a shell command. Usage: run_command <command>';
+    parameters = {
+        type: 'object',
+        properties: {
+            command: { type: 'string', description: 'Command to execute' }
+        },
+        required: ['command']
+    };
+    requiresConfirmation = true;
 
     constructor(private workspaceRoot: string) { }
 
-    async execute(command: string): Promise<string> {
+    async execute(args: any): Promise<string> {
         try {
+            const command = typeof args === 'string' ? args : args.command;
+            if (!command) return 'Error: Missing command';
+
             // Basic security: preventing some obvious dangerous commands could go here
             // For now, we rely on the user (or future validation layer) 
 

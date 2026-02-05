@@ -7,6 +7,12 @@ import { SystemPromptGenerator, AgentMode } from '../agent/system-prompt';
 import { ToolManager } from '../tools/tool-manager';
 import { ReadFileTool, ListDirTool, WriteFileTool } from '../tools/file-tools';
 
+interface WebviewMessage {
+    command: string;
+    text: string;
+    [key: string]: any;
+}
+
 export class ChatPanelProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'ai-agent.chatView';
     private _view?: vscode.WebviewView;
@@ -16,7 +22,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         private readonly _extensionUri: vscode.Uri,
         private readonly _context: vscode.ExtensionContext,
         private readonly _llmService: LLMService,
-        private readonly _projectIndexer: ProjectIndexer,
+        private readonly _projectIndexer: ProjectIndexer | undefined,
         private readonly _toolManager: ToolManager
     ) { }
 
@@ -65,7 +71,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
     private _setWebviewMessageListener(webview: vscode.Webview) {
         webview.onDidReceiveMessage(
-            (message: any) => {
+            (message: WebviewMessage) => {
                 const command = message.command;
                 const text = message.text;
 
@@ -93,7 +99,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         });
 
         // 1. Get latest project state
-        const projectState = await this._projectIndexer.scanFiles();
+        let projectState: any = { files: [], frameworks: [] };
+        if (this._projectIndexer) {
+            projectState = await this._projectIndexer.scanFiles();
+        }
 
         // 2. Generate System Prompt
         const promptGenerator = new SystemPromptGenerator(projectState);

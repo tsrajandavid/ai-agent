@@ -32,7 +32,7 @@
         {
           "id": "ai-agent-sidebar",
           "title": "AI Agent",
-          "icon": "$(hubot)"
+          "icon": "media/robot.svg"
         }
       ]
     },
@@ -41,7 +41,8 @@
         {
           "type": "webview",
           "id": "ai-agent.chatView",
-          "name": "AI Agent Chat"
+          "name": "AI Agent Chat",
+          "icon": "media/robot.svg"
         }
       ]
     },

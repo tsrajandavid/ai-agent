@@ -8,42 +8,33 @@ import { RunCommandTool } from './tools/terminal-tools';
 import { GitStatusTool, GitDiffTool, GitLogTool } from './tools/git-tools';
 import { SnapshotService } from './services/snapshot-service';
 
+let projectIndexer: ProjectIndexer | undefined;
+
 export async function activate(context: vscode.ExtensionContext) {
     console.log('AI Agent activated!');
 
-    // Initialize Indexer
+    // Initialize Indexer and Services
     const workspaceFolders = vscode.workspace.workspaceFolders;
+    let rootPath = "";
+
     if (workspaceFolders) {
-        const rootPath = workspaceFolders[0].uri.fsPath;
-        const indexer = new ProjectIndexer(rootPath);
+        rootPath = workspaceFolders[0].uri.fsPath;
+        projectIndexer = new ProjectIndexer(rootPath);
+        await projectIndexer.initialize(); // Initialize watcher
 
         // Initial scan
         console.log('Indexing project...');
-        const projectState = await indexer.scanFiles();
+        const projectState = await projectIndexer.scanFiles();
         console.log(`Indexed ${projectState.files.length} files.`);
         console.log(`Detected Frameworks: ${projectState.frameworks.join(', ')}`);
-        // Initialize LLM Service
-        const llmService = new LLMService(context);
+    }
 
-        // Initialize Snapshot Service
+    // Initialize LLM Service
+    const llmService = new LLMService(context);
+
+    // Initialize Snapshot Service (Optional, needs rootPath)
+    if (rootPath) {
         const snapshotService = new SnapshotService(rootPath);
-
-        // Register API Key command
-        context.subscriptions.push(
-            vscode.commands.registerCommand('ai-agent.setApiKey', async () => {
-                const apiKey = await vscode.window.showInputBox({
-                    prompt: 'Enter your OpenRouter API Key',
-                    password: true,
-                    ignoreFocusOut: true
-                });
-
-                if (apiKey) {
-                    await llmService.setApiKey(apiKey);
-                    vscode.window.showInformationMessage('API Key saved successfully!');
-                }
-            })
-        );
-
         context.subscriptions.push(
             vscode.commands.registerCommand('ai-agent.createSnapshot', async () => {
                 const name = await vscode.window.showInputBox({ prompt: 'Snapshot Name' });
@@ -57,9 +48,27 @@ export async function activate(context: vscode.ExtensionContext) {
                 }
             })
         );
+    }
 
-        // Initialize Tools
-        const toolManager = new ToolManager();
+    // Register API Key command
+    context.subscriptions.push(
+        vscode.commands.registerCommand('ai-agent.setApiKey', async () => {
+            const apiKey = await vscode.window.showInputBox({
+                prompt: 'Enter your OpenRouter API Key',
+                password: true,
+                ignoreFocusOut: true
+            });
+
+            if (apiKey) {
+                await llmService.setApiKey(apiKey);
+                vscode.window.showInformationMessage('API Key saved successfully!');
+            }
+        })
+    );
+
+    // Initialize Tools
+    const toolManager = new ToolManager();
+    if (rootPath) {
         toolManager.registerTool(new ReadFileTool(rootPath));
         toolManager.registerTool(new ListDirTool(rootPath));
         toolManager.registerTool(new WriteFileTool(rootPath));
@@ -67,24 +76,25 @@ export async function activate(context: vscode.ExtensionContext) {
         toolManager.registerTool(new GitStatusTool(rootPath));
         toolManager.registerTool(new GitDiffTool(rootPath));
         toolManager.registerTool(new GitLogTool(rootPath));
-
-        const provider = new ChatPanelProvider(context.extensionUri, context, llmService, indexer, toolManager);
-        context.subscriptions.push(
-            vscode.window.registerWebviewViewProvider(ChatPanelProvider.viewType, provider)
-        );
-
-        const disposable = vscode.commands.registerCommand(
-            'ai-agent.openChat',
-            () => {
-                vscode.commands.executeCommand('workbench.view.extension.ai-agent-sidebar');
-            }
-        );
-
-        context.subscriptions.push(disposable);
     }
 
+    // Register Webview Provider (ALWAYS)
+    const provider = new ChatPanelProvider(context.extensionUri, context, llmService, projectIndexer, toolManager);
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider(ChatPanelProvider.viewType, provider)
+    );
+
+    const disposable = vscode.commands.registerCommand(
+        'ai-agent.openChat',
+        () => {
+            vscode.commands.executeCommand('workbench.view.extension.ai-agent-sidebar');
+        }
+    );
+
+    context.subscriptions.push(disposable);
 }
 
 export function deactivate() {
     console.log('AI Agent deactivated!');
+    projectIndexer?.dispose();
 }
