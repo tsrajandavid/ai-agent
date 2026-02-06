@@ -43,6 +43,12 @@ export function useVSCode() {
                 return;
             }
 
+            // Clear streaming content (for retry)
+            if (message.command === 'clear-stream') {
+                setStreamingContent("");
+                return;
+            }
+
             // Tool call - show that AI is using a tool
             if (message.command === 'tool-call') {
                 // Clear any streaming content first

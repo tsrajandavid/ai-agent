@@ -4,9 +4,30 @@ import OpenAI from 'openai';
 export class LLMService {
     private openai?: OpenAI;
     private model: string = 'Qwen 2.5 Coder 3B (Local)'; // Default: Local Qwen model
+    private abortController: AbortController | null = null;
 
     constructor(private context: vscode.ExtensionContext) {
         this.initialize();
+    }
+
+    /**
+     * Abort the current request if one is in progress
+     */
+    public abort(): boolean {
+        if (this.abortController) {
+            this.abortController.abort();
+            this.abortController = null;
+            console.log('[LLM Service] Request aborted');
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Check if a request is currently in progress
+     */
+    public isRequestInProgress(): boolean {
+        return this.abortController !== null;
     }
 
     private async initialize() {
@@ -53,52 +74,58 @@ export class LLMService {
     public async sendRequest(messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[], onChunk?: (chunk: string) => void): Promise<string> {
         console.log('[LLM Service] sendRequest called, model:', this.model);
 
-        // Handle Local Ollama Case
-        if (this.model === "qwen2.5-coder:3b" || this.model.includes("(Local)")) {
-            console.log('[LLM Service] Using local Ollama...');
-            const ollama = new OpenAI({
-                baseURL: 'http://localhost:11434/v1',
-                apiKey: 'ollama', // Ollama doesn't require an API key, but client might
-            });
-            try {
+        // Create new abort controller for this request
+        this.abortController = new AbortController();
+        const signal = this.abortController.signal;
+
+        try {
+            // Handle Local Ollama Case
+            if (this.model === "qwen2.5-coder:3b" || this.model.includes("(Local)")) {
+                console.log('[LLM Service] Using local Ollama...');
+                const ollama = new OpenAI({
+                    baseURL: 'http://localhost:11434/v1',
+                    apiKey: 'ollama', // Ollama doesn't require an API key, but client might
+                });
+
                 console.log('[LLM Service] Creating Ollama stream...');
                 const stream = await ollama.chat.completions.create({
                     model: 'qwen2.5-coder:3b', // Map UI name to Ollama model name
                     messages: messages,
                     stream: true,
-                });
+                }, { signal });
 
                 let fullResponse = '';
                 for await (const chunk of stream) {
+                    if (signal.aborted) {
+                        throw new Error('Request aborted');
+                    }
                     const content = chunk.choices[0]?.delta?.content || '';
                     fullResponse += content;
                     if (onChunk) onChunk(content);
                 }
                 console.log('[LLM Service] Ollama response complete, length:', fullResponse.length);
                 return fullResponse;
-            } catch (error) {
-                console.error("[LLM Service] Local LLM Error:", error);
-                throw new Error("Failed to connect to Local LLM at http://localhost:11434. Is Ollama running?");
             }
-        }
 
-        // Standard OpenRouter Case
-        if (!this.openai) {
-            console.error('[LLM Service] OpenAI client not initialized - API Key missing');
-            throw new Error('API Key not configured. Please set your OpenRouter API Key.');
-        }
+            // Standard OpenRouter Case
+            if (!this.openai) {
+                console.error('[LLM Service] OpenAI client not initialized - API Key missing');
+                throw new Error('API Key not configured. Please set your OpenRouter API Key.');
+            }
 
-        try {
             console.log('[LLM Service] Creating OpenRouter stream for model:', this.model);
             const stream = await this.openai.chat.completions.create({
                 model: this.model,
                 messages: messages,
                 stream: true,
-            });
+            }, { signal });
 
             let fullResponse = '';
 
             for await (const chunk of stream) {
+                if (signal.aborted) {
+                    throw new Error('Request aborted');
+                }
                 const content = chunk.choices[0]?.delta?.content || '';
                 fullResponse += content;
                 if (onChunk) {
@@ -108,9 +135,15 @@ export class LLMService {
 
             console.log('[LLM Service] OpenRouter response complete, length:', fullResponse.length);
             return fullResponse;
-        } catch (error) {
+        } catch (error: any) {
+            if (error.name === 'AbortError' || error.message === 'Request aborted') {
+                console.log('[LLM Service] Request was aborted');
+                throw new Error('Request aborted by user');
+            }
             console.error('[LLM Service] LLM Request failed:', error);
             throw error;
+        } finally {
+            this.abortController = null;
         }
     }
 

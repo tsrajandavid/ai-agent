@@ -64,18 +64,17 @@ export class ToolManager {
     parseCommand(input: string): { command: string, args: any } | null {
         const trimmed = input.trim();
 
-        // 1. Try JSON parsing
-        // Look for markdown code blocks with json or just braces
-        const jsonMatch = trimmed.match(/```json\s*(\{[\s\S]*?\})\s*```/) || trimmed.match(/(\{[\s\S]*?\})/);
-        if (jsonMatch) {
+        // 1. Try to extract JSON with proper brace matching
+        const jsonStr = this.extractJSON(trimmed);
+        if (jsonStr) {
             try {
-                const parsed = JSON.parse(jsonMatch[1]);
+                const parsed = JSON.parse(jsonStr);
                 if (parsed.tool && parsed.args) {
+                    console.log('[ToolManager] Parsed tool call:', parsed.tool);
                     return { command: parsed.tool, args: parsed.args };
                 }
-                // Alternate format: { "tool_name": { args... } } - maybe later
             } catch (e) {
-                // Not valid JSON, fall through
+                console.log('[ToolManager] JSON parse failed:', e);
             }
         }
 
@@ -91,5 +90,83 @@ export class ToolManager {
         }
 
         return null;
+    }
+
+    // Extract JSON object with proper brace matching (handles nested objects)
+    private extractJSON(input: string): string | null {
+        // First try markdown code block
+        const codeBlockMatch = input.match(/```(?:json)?\s*([\s\S]*?)```/);
+        if (codeBlockMatch) {
+            const content = codeBlockMatch[1].trim();
+            if (content.startsWith('{')) {
+                return this.extractBalancedJSON(content);
+            }
+        }
+
+        // Find the first { that might start a tool call
+        const toolPatterns = [
+            /\{"tool"\s*:/,
+            /\{\s*"tool"\s*:/,
+            /\{'tool'\s*:/
+        ];
+
+        for (const pattern of toolPatterns) {
+            const match = input.match(pattern);
+            if (match && match.index !== undefined) {
+                const startIdx = match.index;
+                const result = this.extractBalancedJSON(input.slice(startIdx));
+                if (result) return result;
+            }
+        }
+
+        // Fallback: find any JSON object
+        const firstBrace = input.indexOf('{');
+        if (firstBrace !== -1) {
+            return this.extractBalancedJSON(input.slice(firstBrace));
+        }
+
+        return null;
+    }
+
+    // Extract a balanced JSON object by counting braces
+    private extractBalancedJSON(input: string): string | null {
+        if (!input.startsWith('{')) return null;
+
+        let depth = 0;
+        let inString = false;
+        let escape = false;
+
+        for (let i = 0; i < input.length; i++) {
+            const char = input[i];
+
+            if (escape) {
+                escape = false;
+                continue;
+            }
+
+            if (char === '\\' && inString) {
+                escape = true;
+                continue;
+            }
+
+            if (char === '"') {
+                inString = !inString;
+                continue;
+            }
+
+            if (!inString) {
+                if (char === '{') {
+                    depth++;
+                } else if (char === '}') {
+                    depth--;
+                    if (depth === 0) {
+                        // Found complete JSON object
+                        return input.slice(0, i + 1);
+                    }
+                }
+            }
+        }
+
+        return null; // Unbalanced braces
     }
 }

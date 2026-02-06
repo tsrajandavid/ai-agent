@@ -6,125 +6,98 @@ export class SystemPromptGenerator {
     constructor(private readonly projectState: ProjectState) { }
 
     public generate(mode: AgentMode, contextFiles: Record<string, string> = {}): string {
+        // Strong, explicit instructions for small models
         const toolsSection = `
-## CRITICAL: Tool Usage
+# CRITICAL: NEVER WRITE CODE IN CHAT
 
-You MUST use tools for file operations. When asked to create, read, edit, or work with files, ALWAYS respond with ONLY a JSON tool call.
+You are a VS Code AI assistant. You have tools to create and edit files.
 
-**Response format when using a tool:**
+## ABSOLUTE RULE - READ THIS CAREFULLY
+NEVER write code blocks in your response.
+NEVER paste code in chat.
+NEVER show "here's the code" followed by a code block.
+ALWAYS use the write_file tool to create files.
+
+When user asks to create code/files:
+1. Say briefly what you will create
+2. Output ONLY the JSON tool call
+3. The tool will show approval UI to user
+
+## TOOL FORMAT
+
+Create a file (outputs ONLY this JSON, nothing else):
 \`\`\`json
-{"tool": "tool_name", "args": {...}}
+{"tool": "write_file", "args": {"path": "filename.js", "content": "// file content"}}
 \`\`\`
 
-### Available Tools
+Read a file:
+\`\`\`json
+{"tool": "read_file", "args": {"path": "filename.js"}}
+\`\`\`
 
-**File Operations:**
-- **write_file** - Create or overwrite a file
-  Example: \`{"tool": "write_file", "args": {"path": "test.txt", "content": "hello world"}}\`
+Edit a file:
+\`\`\`json
+{"tool": "edit_file", "args": {"path": "filename.js", "old_string": "old text", "new_string": "new text"}}
+\`\`\`
 
-- **read_file** - Read file contents
-  Example: \`{"tool": "read_file", "args": {"path": "src/index.ts"}}\`
+Run command:
+\`\`\`json
+{"tool": "run_command", "args": {"command": "npm test"}}
+\`\`\`
 
-- **edit_file** - Edit existing file (find and replace)
-  Example: \`{"tool": "edit_file", "args": {"path": "file.ts", "old_string": "old text", "new_string": "new text"}}\`
+## EXAMPLES
 
-- **list_dir** - List directory contents
-  Example: \`{"tool": "list_dir", "args": {"path": "."}}\`
+User: "Create a chess game"
 
-- **search_files** - Find files by pattern
-  Example: \`{"tool": "search_files", "args": {"pattern": "*.ts"}}\`
+WRONG (DO NOT DO THIS):
+"Here's a chess game:
+\\\`\\\`\\\`javascript
+const board = document.getElementById('board');
+// ... more code
+\\\`\\\`\\\`"
 
-- **grep** - Search text in files
-  Example: \`{"tool": "grep", "args": {"pattern": "TODO"}}\`
+CORRECT:
+"I'll create a chess game with the necessary files."
+\`\`\`json
+{"tool": "write_file", "args": {"path": "chess.html", "content": "<!DOCTYPE html>..."}}
+\`\`\`
 
-**Terminal & Git:**
-- **run_command** - Run shell command
-- **git_status** - Get git status
-- **git_diff** - Show changes
-- **git_log** - Show commits
+User: "Create hello.txt with hello world"
 
-## MANDATORY RULES
+CORRECT:
+\`\`\`json
+{"tool": "write_file", "args": {"path": "hello.txt", "content": "hello world"}}
+\`\`\`
 
-1. When user says "create file X" → respond with ONLY: \`{"tool": "write_file", "args": {"path": "X", "content": "..."}}\`
-2. When user says "read file X" → respond with ONLY: \`{"tool": "read_file", "args": {"path": "X"}}\`
-3. When user says "edit file X" → respond with ONLY: \`{"tool": "edit_file", "args": {...}}\`
-4. DO NOT explain how to create files - USE THE TOOL
-5. DO NOT show code examples - USE THE TOOL
-6. Your response should be ONLY the JSON tool call, nothing else
-`;
-
-        const rulesSection = `
-## Important Rules
-
-1. **Read before edit**: Always read a file before modifying it to understand its structure
-2. **Use edit_file for changes**: For existing files, use edit_file with exact matching text
-3. **Be precise**: The old_string in edit_file must match exactly (including whitespace)
-4. **One tool at a time**: Use one tool per response, wait for results
-5. **Simple questions**: For general questions, answer directly without tools
-6. **Explain your actions**: Tell the user what you're doing and why
-`;
-
-        const projectInfo = `
-## Project Context
-- Files indexed: ${this.projectState.files?.length || 0}
-- Frameworks: ${this.projectState.frameworks?.join(', ') || 'None detected'}
+## REMEMBER
+- User asks for code → USE write_file TOOL
+- User asks to create file → USE write_file TOOL
+- User asks to edit file → USE edit_file TOOL
+- NEVER paste code in chat messages
 `;
 
         // Build context section if files are selected
         let contextSection = '';
         const contextPaths = Object.keys(contextFiles);
         if (contextPaths.length > 0) {
-            contextSection = `
-## Active Context (User Selected Files)
-The user has added these files to context. Prioritize them in your analysis:
-
-`;
+            contextSection = `\n## Context Files\n`;
             for (const [filePath, content] of Object.entries(contextFiles)) {
-                const preview = content.length > 2000 ? content.slice(0, 2000) + '\n... (truncated)' : content;
-                contextSection += `### ${filePath}\n\`\`\`\n${preview}\n\`\`\`\n\n`;
+                const preview = content.length > 1500 ? content.slice(0, 1500) + '\n...(truncated)' : content;
+                contextSection += `### ${filePath}\n\`\`\`\n${preview}\n\`\`\`\n`;
             }
         }
 
-        // Mode-specific instructions
-        let modeInstructions = '';
-        switch (mode) {
-            case 'PLAN':
-                modeInstructions = `
-## Mode: Planning
-Before making changes, briefly plan then execute:
-1. Understand the user's request
-2. Use tools to explore if needed
-3. Execute the required changes using tools
-
-You CAN and SHOULD use write_file and edit_file when the user asks to create or modify files.`;
-                break;
-
-            case 'ACT':
-                modeInstructions = `
-## Mode: Action
-Directly execute file operations:
-1. Use write_file to create files
-2. Use edit_file to modify files
-3. Use read_file to view files
-
-When user asks to create a file, immediately use write_file tool.`;
-                break;
-
-            case 'ASK':
-                modeInstructions = `
-## Mode: Ask
-Answer questions and explain code. You can read files but do NOT modify anything.`;
-                break;
+        // Mode-specific
+        let modeNote = '';
+        if (mode === 'ASK') {
+            modeNote = '\n## MODE: ASK ONLY\nAnswer questions only. Do not create or modify files.';
+        } else if (mode === 'PLAN') {
+            modeNote = '\n## MODE: PLANNING\nDescribe what you will do, then use tools to execute.';
         }
 
-        return `You are an AI coding assistant integrated into VS Code. You help developers understand, write, and modify code.
+        return `${toolsSection}${contextSection}${modeNote}
 
-${toolsSection}
-${rulesSection}
-${projectInfo}
-${contextSection}
-${modeInstructions}
-
-Remember: Be helpful, precise, and explain your reasoning. When using tools, output ONLY the JSON block for the tool call.`;
+For questions that don't require file creation, answer normally without code blocks.
+If the user wants code created, USE THE TOOLS - never paste code in chat.`;
     }
 }

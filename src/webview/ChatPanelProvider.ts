@@ -185,6 +185,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
                         this._conversationHistory = [];
                         this._saveChatHistory();
                         return;
+                    case "stop-generation":
+                        const aborted = this._llmService.abort();
+                        if (aborted) {
+                            webview.postMessage({
+                                command: 'generation-stopped',
+                                text: '⏹️ Generation stopped',
+                                role: 'system'
+                            });
+                        }
+                        return;
                 }
             },
             undefined,
@@ -285,14 +295,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
                 webview.postMessage({ command: "stream-chunk", chunk });
             });
 
-            console.log('[AI Agent] LLM response:', fullResponse.slice(0, 200) + '...');
+            console.log('[AI Agent] LLM response length:', fullResponse.length);
+            console.log('[AI Agent] LLM response preview:', fullResponse.slice(0, 500));
 
             // Parse for tool calls
             const toolCall = this._toolManager.parseCommand(fullResponse);
 
             if (toolCall) {
                 // Found a tool call - execute it
-                console.log('[AI Agent] Tool call detected:', toolCall.command);
+                console.log('[AI Agent] Tool call detected:', toolCall.command, 'args:', JSON.stringify(toolCall.args).slice(0, 200));
 
                 const tool = this._toolManager.getTool(toolCall.command);
 
@@ -385,8 +396,31 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
                 continue;
             }
 
-            // No tool call - this is the final response
-            console.log('[AI Agent] No tool call, final response');
+            // No tool call found
+            console.log('[AI Agent] No tool call detected');
+
+            // Check if user asked for file operation but LLM didn't use tool (retry once)
+            const lastUserMsg = messages.filter(m => m.role === 'user').pop()?.content || '';
+            const askedForFileOp = /\b(create|make|write|edit|modify|update|add|generate)\b.*\b(file|code|script|component|function)\b/i.test(lastUserMsg);
+
+            if (askedForFileOp && iterations === 1) {
+                console.log('[AI Agent] User asked for file operation but no tool used - retrying with reminder');
+
+                // Clear the streamed content
+                webview.postMessage({ command: "clear-stream" });
+
+                // Add a strong reminder and retry
+                messages.push({ role: 'assistant', content: fullResponse });
+                messages.push({
+                    role: 'user',
+                    content: `You explained how to do it, but I need you to ACTUALLY create the file using the write_file tool. Please respond with ONLY the JSON tool call like this:
+\`\`\`json
+{"tool": "write_file", "args": {"path": "filename", "content": "content"}}
+\`\`\`
+Do not explain. Just output the JSON.`
+                });
+                continue; // Retry
+            }
 
             // Add to conversation history
             this._conversationHistory.push({ role: 'assistant', content: fullResponse });
@@ -432,9 +466,24 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
                 case '/help':
                     const helpMessage = `### Available Commands
+
+**Git Commands:**
+- \`/commit [message]\` - Commit changes (AI generates message if not provided)
+- \`/diff\` - Show uncommitted changes
+- \`/status\` - Show git status
+- \`/log\` - Show recent commits
+
+**Project Commands:**
+- \`/test\` - Run tests
+- \`/build\` - Run build
+- \`/run <cmd>\` - Run shell command
+
+**Context Commands:**
 - \`/add <path>\` - Add file to context
 - \`/remove <path>\` - Remove file from context
 - \`/context\` - List files in context
+
+**Session Commands:**
 - \`/clear\` - Clear chat history
 - \`/reset\` - Reset everything
 - \`/help\` - Show this help`;
@@ -485,6 +534,40 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
                     }
                     return;
 
+                // Git Commands
+                case '/commit':
+                    await this.handleCommit(argText, webview);
+                    return;
+
+                case '/diff':
+                    await this.handleGitCommand('git_diff', 'Git Diff', webview);
+                    return;
+
+                case '/status':
+                    await this.handleGitCommand('git_status', 'Git Status', webview);
+                    return;
+
+                case '/log':
+                    await this.handleGitCommand('git_log', 'Git Log', webview);
+                    return;
+
+                // Project Commands
+                case '/test':
+                    await this.handleRunCommand('npm test', 'Running Tests', webview);
+                    return;
+
+                case '/build':
+                    await this.handleRunCommand('npm run build', 'Building Project', webview);
+                    return;
+
+                case '/run':
+                    if (!argText) {
+                        webview.postMessage({ command: 'response-complete', text: '❌ Please specify a command to run', role: 'system' });
+                        return;
+                    }
+                    await this.handleRunCommand(argText, `Running: ${argText}`, webview);
+                    return;
+
                 default:
                     webview.postMessage({
                         command: 'response-complete',
@@ -516,6 +599,117 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             return await tool.execute(args);
         } catch (error) {
             return `Error executing ${command}: ${error}`;
+        }
+    }
+
+    /**
+     * Handle /commit command - creates a git commit
+     */
+    private async handleCommit(message: string, webview: vscode.Webview) {
+        if (!this._ensureToolsRegistered()) {
+            webview.postMessage({ command: 'response-complete', text: '❌ No workspace folder open', role: 'system' });
+            return;
+        }
+
+        try {
+            // First get the diff to show what's being committed
+            const diffResult = await this._executeToolDirect('git_diff', {});
+
+            if (diffResult.includes('No changes') || diffResult.includes('Error')) {
+                webview.postMessage({ command: 'response-complete', text: '📭 No changes to commit', role: 'system' });
+                return;
+            }
+
+            // If no message provided, ask AI to generate one
+            let commitMessage = message;
+            if (!commitMessage) {
+                webview.postMessage({ command: 'response-complete', text: '🤖 Generating commit message...', role: 'system' });
+
+                // Use LLM to generate commit message
+                const prompt = `Based on this git diff, generate a concise commit message (one line, max 72 chars). Only output the commit message, nothing else:\n\n${diffResult.slice(0, 2000)}`;
+
+                let generatedMessage = '';
+                await this._llmService.sendRequest(
+                    [{ role: 'user', content: prompt }] as any,
+                    (chunk) => { generatedMessage += chunk; }
+                );
+
+                commitMessage = generatedMessage.trim().replace(/^["']|["']$/g, '').split('\n')[0];
+            }
+
+            // Show what will be committed
+            webview.postMessage({
+                command: 'response-complete',
+                text: `### 📝 Commit Preview\n\n**Message:** ${commitMessage}\n\n**Changes:**\n\`\`\`diff\n${diffResult.slice(0, 1000)}${diffResult.length > 1000 ? '\n...(truncated)' : ''}\n\`\`\`\n\n*Run \`git commit -m "${commitMessage}"\` to commit*`,
+                role: 'system'
+            });
+
+        } catch (error) {
+            webview.postMessage({
+                command: 'response-complete',
+                text: `❌ Commit failed: ${error instanceof Error ? error.message : String(error)}`,
+                role: 'system'
+            });
+        }
+    }
+
+    /**
+     * Handle git commands (/diff, /status, /log)
+     */
+    private async handleGitCommand(toolName: string, title: string, webview: vscode.Webview) {
+        if (!this._ensureToolsRegistered()) {
+            webview.postMessage({ command: 'response-complete', text: '❌ No workspace folder open', role: 'system' });
+            return;
+        }
+
+        try {
+            webview.postMessage({ command: 'response-complete', text: `⏳ ${title}...`, role: 'system' });
+
+            const result = await this._executeToolDirect(toolName, {});
+
+            webview.postMessage({
+                command: 'response-complete',
+                text: `### ${title}\n\n\`\`\`\n${result}\n\`\`\``,
+                role: 'system'
+            });
+        } catch (error) {
+            webview.postMessage({
+                command: 'response-complete',
+                text: `❌ ${title} failed: ${error instanceof Error ? error.message : String(error)}`,
+                role: 'system'
+            });
+        }
+    }
+
+    /**
+     * Handle /run, /test, /build commands
+     */
+    private async handleRunCommand(cmd: string, title: string, webview: vscode.Webview) {
+        if (!this._ensureToolsRegistered()) {
+            webview.postMessage({ command: 'response-complete', text: '❌ No workspace folder open', role: 'system' });
+            return;
+        }
+
+        try {
+            webview.postMessage({ command: 'response-complete', text: `⏳ ${title}...`, role: 'system' });
+
+            const result = await this._executeToolDirect('run_command', { command: cmd });
+
+            // Determine if command succeeded or failed based on output
+            const isError = result.toLowerCase().includes('error') || result.toLowerCase().includes('failed');
+            const icon = isError ? '❌' : '✅';
+
+            webview.postMessage({
+                command: 'response-complete',
+                text: `### ${icon} ${title}\n\n\`\`\`\n${result}\n\`\`\``,
+                role: 'system'
+            });
+        } catch (error) {
+            webview.postMessage({
+                command: 'response-complete',
+                text: `❌ ${title} failed: ${error instanceof Error ? error.message : String(error)}`,
+                role: 'system'
+            });
         }
     }
 
