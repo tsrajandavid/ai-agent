@@ -7,9 +7,12 @@ import { ReadFileTool, ListDirTool, WriteFileTool, EditFileTool, SearchFilesTool
 import { RunCommandTool } from './tools/terminal-tools';
 import { GitStatusTool, GitDiffTool, GitLogTool } from './tools/git-tools';
 import { SnapshotService } from './services/snapshot-service';
+import { TaskGroupManager } from './agent/task-group-manager';
+import { SQLiteAdapter } from './agent/storage/sqlite-adapter';
 
 let projectIndexer: ProjectIndexer | undefined;
 let toolManager: ToolManager;
+let taskGroupManager: TaskGroupManager | undefined;
 
 // Helper function to register all tools
 function registerTools(rootPath: string) {
@@ -194,6 +197,7 @@ export async function activate(context: vscode.ExtensionContext) {
         llmService,
         projectIndexer,
         toolManager,
+        taskGroupManager,
         ensureToolsRegistered  // Pass the function to ensure tools are registered
     );
     context.subscriptions.push(
@@ -207,7 +211,41 @@ export async function activate(context: vscode.ExtensionContext) {
         }
     );
 
+
     context.subscriptions.push(disposable);
+
+    // Register Create Task Group Command
+    context.subscriptions.push(
+        vscode.commands.registerCommand('ai-agent.createTaskGroup', async () => {
+            if (!taskGroupManager) {
+                vscode.window.showErrorMessage('Task Group Manager not initialized');
+                return;
+            }
+
+            const title = await vscode.window.showInputBox({
+                title: "Task Group Title",
+                prompt: "e.g., Refactor Auth System"
+            });
+            if (!title) return;
+
+            const goal = await vscode.window.showInputBox({
+                title: "Task Group Goal",
+                prompt: "Describe what needs to be achieved",
+                value: title
+            });
+            if (!goal) return;
+
+            try {
+                const group = await taskGroupManager.create(title, goal);
+                provider.updateTaskGroup(group);
+                vscode.window.showInformationMessage(`Task Group "${title}" created!`);
+                // Open the sidebar
+                vscode.commands.executeCommand('workbench.view.extension.ai-agent-sidebar');
+            } catch (e: any) {
+                vscode.window.showErrorMessage(`Failed to create task group: ${e.message}`);
+            }
+        })
+    );
 }
 
 export function deactivate() {

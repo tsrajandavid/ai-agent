@@ -5,6 +5,7 @@ import { LLMService } from '../llm/llm-service';
 import { ProjectIndexer } from '../services/project-indexer';
 import { SystemPromptGenerator, AgentMode } from '../agent/system-prompt';
 import { ToolManager } from '../tools/tool-manager';
+import { TaskGroupManager } from '../agent/task-group-manager';
 
 interface WebviewMessage {
     command: string;
@@ -32,17 +33,37 @@ interface PendingApproval {
     args: any;
 }
 
-const MAX_TOOL_ITERATIONS = 10; // Prevent infinite loops
-const CHAT_HISTORY_KEY = 'ai-agent.chatHistory';
+interface Conversation {
+    id: string;
+    title: string;
+    timestamp: number;
+    messages: ChatMessage[];
+}
+
+const MAX_TOOL_ITERATIONS = 10;
+const OLD_CHAT_HISTORY_KEY = 'ai-agent.chatHistory';
+const CONVERSATIONS_KEY = 'ai-agent.conversations';
 
 export class ChatPanelProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'ai-agent.chatView';
     private _view?: vscode.WebviewView;
+
+    public updateTaskGroup(taskGroup: any) {
+        if (this._view) {
+            this._view.webview.postMessage({
+                command: 'update-task-group',
+                taskGroup: taskGroup
+            });
+        }
+    }
+
     private _currentMode: AgentMode = 'PLAN';
-    private _conversationHistory: ConversationMessage[] = [];
     private _selectedFiles: Record<string, string> = {};
-    private _chatHistory: ChatMessage[] = [];
     private _pendingApproval: PendingApproval | null = null;
+
+    // Multi-chat state
+    private _conversations: Conversation[] = [];
+    private _activeConversationId: string = '';
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
@@ -50,8 +71,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         private readonly _llmService: LLMService,
         private readonly _projectIndexer: ProjectIndexer | undefined,
         private readonly _toolManager: ToolManager,
+        private readonly _taskGroupManager: TaskGroupManager | undefined,
         private readonly _ensureToolsRegistered: () => boolean
     ) { }
+
+    // ... resolveWebviewView (remains mostly same, but calls different load method)
 
     public resolveWebviewView(
         webviewView: vscode.WebviewView,
@@ -71,16 +95,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
         this._setWebviewMessageListener(webviewView.webview);
 
-        // Load and send chat history
-        this._loadChatHistory();
-        setTimeout(() => {
-            webviewView.webview.postMessage({
-                command: 'restore-history',
-                messages: this._chatHistory
-            });
-        }, 500);
+        // Load conversations (migrating if needed)
+        this._loadConversations();
 
-        // Send initial File List
+        // Initial setup happens when webview sends 'webview-ready'
+
         if (this._projectIndexer) {
             this._projectIndexer.scanFiles().then(state => {
                 webviewView.webview.postMessage({
@@ -91,31 +110,94 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    private _loadChatHistory() {
+    private _loadConversations() {
         try {
-            const stored = this._context.globalState.get<ChatMessage[]>(CHAT_HISTORY_KEY);
-            if (stored && Array.isArray(stored)) {
-                this._chatHistory = stored;
-                console.log(`[AI Agent] Loaded ${stored.length} messages from history`);
+            // Check for new storage format
+            const storedConversations = this._context.globalState.get<Conversation[]>(CONVERSATIONS_KEY);
+
+            if (storedConversations && Array.isArray(storedConversations) && storedConversations.length > 0) {
+                this._conversations = storedConversations;
+                // Set active to most recent
+                this._conversations.sort((a, b) => b.timestamp - a.timestamp);
+                this._activeConversationId = this._conversations[0].id;
+            } else {
+                // Migration path: Check for old history
+                const oldHistory = this._context.globalState.get<ChatMessage[]>(OLD_CHAT_HISTORY_KEY);
+                if (oldHistory && Array.isArray(oldHistory) && oldHistory.length > 0) {
+                    console.log('[AI Agent] Migrating old history to new conversation format');
+                    const migratedChat: Conversation = {
+                        id: Date.now().toString(),
+                        title: 'Previous Session',
+                        timestamp: Date.now(),
+                        messages: oldHistory
+                    };
+                    this._conversations = [migratedChat];
+                    this._activeConversationId = migratedChat.id;
+                    this._saveConversations();
+                } else {
+                    // Start fresh
+                    this._createNewChat();
+                }
             }
         } catch (e) {
-            console.error('[AI Agent] Failed to load chat history:', e);
+            console.error('[AI Agent] Failed to load conversations:', e);
+            this._createNewChat();
         }
     }
 
-    private _saveChatHistory() {
+    private _createNewChat() {
+        const newChat: Conversation = {
+            id: Date.now().toString(),
+            title: 'New Chat',
+            timestamp: Date.now(),
+            messages: []
+        };
+        this._conversations.unshift(newChat);
+        this._activeConversationId = newChat.id;
+        this._saveConversations();
+        return newChat;
+    }
+
+    private _saveConversations() {
         try {
-            // Keep last 100 messages
-            const toSave = this._chatHistory.slice(-100);
-            this._context.globalState.update(CHAT_HISTORY_KEY, toSave);
+            this._context.globalState.update(CONVERSATIONS_KEY, this._conversations);
         } catch (e) {
-            console.error('[AI Agent] Failed to save chat history:', e);
+            console.error('[AI Agent] Failed to save conversations:', e);
         }
+    }
+
+    private get _activeChat(): Conversation | undefined {
+        return this._conversations.find(c => c.id === this._activeConversationId);
     }
 
     private _addToHistory(msg: ChatMessage) {
-        this._chatHistory.push({ ...msg, timestamp: Date.now() });
-        this._saveChatHistory();
+        const chat = this._activeChat;
+        if (chat) {
+            chat.messages.push({ ...msg, timestamp: Date.now() });
+
+            // Generate title if it's the first user message and title is "New Chat"
+            if (msg.role === 'user' && chat.title === 'New Chat') {
+                this._generateTitle(chat.id, msg.text);
+            }
+
+            // Update timestamp to move to top
+            chat.timestamp = Date.now();
+            this._saveConversations();
+        }
+    }
+
+    // Helper to generate simple title (first 30 chars for now)
+    private _generateTitle(chatId: string, text: string) {
+        const chat = this._conversations.find(c => c.id === chatId);
+        if (chat) {
+            chat.title = text.slice(0, 30) + (text.length > 30 ? '...' : '');
+            this._saveConversations();
+            // Notify UI of title update
+            this._view?.webview.postMessage({
+                command: 'update-conversation-list',
+                conversations: this._conversations.map(c => ({ id: c.id, title: c.title, timestamp: c.timestamp }))
+            });
+        }
     }
 
     private _getHtmlForWebview(webview: vscode.Webview) {
@@ -131,7 +213,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
                 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
                 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
                 <link rel="stylesheet" type="text/css" href="${stylesUri}">
-                <title>AI Agent</title>
+                <title>Akku AI</title>
             </head>
             <body>
                 <div id="root"></div>
@@ -143,7 +225,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
     private _setWebviewMessageListener(webview: vscode.Webview) {
         webview.onDidReceiveMessage(
-            (message: WebviewMessage) => {
+            async (message: WebviewMessage) => {
                 const command = message.command;
                 const text = message.text;
 
@@ -158,6 +240,146 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
                     case "setModel":
                         this._llmService.setModel(text);
                         return;
+                    case "webview-ready":
+                        // Send current chat history
+                        webview.postMessage({
+                            command: 'restore-history',
+                            messages: this._activeChat?.messages || []
+                        });
+                        // Send conversation list
+                        webview.postMessage({
+                            command: 'update-conversation-list',
+                            conversations: this._conversations.map(c => ({ id: c.id, title: c.title, timestamp: c.timestamp })),
+                            activeId: this._activeConversationId
+                        });
+                        return;
+
+                        // Multi-chat commands
+                        return;
+
+                    case "create-task-group-request":
+                        if (!this._taskGroupManager) {
+                            vscode.window.showErrorMessage("Task Group Manager not initialized");
+                            return;
+                        }
+
+                        const title = await vscode.window.showInputBox({
+                            title: "Task Group Title",
+                            prompt: "e.g., Refactor Auth System"
+                        });
+
+                        if (!title) return;
+
+                        const goal = await vscode.window.showInputBox({
+                            title: "Task Group Goal",
+                            prompt: "Describe what needs to be achieved",
+                            value: title
+                        });
+
+                        if (!goal) return;
+
+                        const newGroup = await this._taskGroupManager.create(title, goal);
+                        webview.postMessage({
+                            command: 'update-task-group',
+                            taskGroup: newGroup
+                        });
+                        return;
+
+                    case "toggle-subtask":
+                        if (!this._taskGroupManager) return;
+                        try {
+                            const data = typeof message.text === 'string' ? JSON.parse(message.text) : message;
+                            // Update subtask
+                            await this._taskGroupManager.updateSubtaskStatus(
+                                data.groupId,
+                                data.subtaskId,
+                                data.completed ? 'completed' : 'not-started'
+                            );
+
+                            // Send full update back
+                            const updatedGroup = await this._taskGroupManager.get(data.groupId);
+                            if (updatedGroup) {
+                                webview.postMessage({
+                                    command: 'update-task-group',
+                                    taskGroup: updatedGroup
+                                });
+                            }
+                        } catch (e) {
+                            console.error('Failed to toggle subtask:', e);
+                        }
+                        return;
+
+                    case "new-chat":
+                        const newChat = this._createNewChat();
+                        this._llmService.resetContext();
+                        webview.postMessage({
+                            command: 'restore-history',
+                            messages: []
+                        });
+                        webview.postMessage({
+                            command: 'update-conversation-list',
+                            conversations: this._conversations.map(c => ({ id: c.id, title: c.title, timestamp: c.timestamp })),
+                            activeId: this._activeConversationId
+                        });
+                        return;
+
+                    case "load-chat":
+                        try {
+                            const payload = typeof message.text === 'string' ? JSON.parse(message.text) : message;
+                            const chatId = payload.chatId;
+                            const targetChat = this._conversations.find(c => c.id === chatId);
+                            if (targetChat) {
+                                this._activeConversationId = targetChat.id;
+                                this._llmService.resetContext(); // Context will be rebuilt on next user message
+
+                                webview.postMessage({
+                                    command: 'restore-history',
+                                    messages: targetChat.messages
+                                });
+                                webview.postMessage({
+                                    command: 'update-conversation-list',
+                                    conversations: this._conversations.map(c => ({ id: c.id, title: c.title, timestamp: c.timestamp })),
+                                    activeId: this._activeConversationId
+                                });
+                            }
+                        } catch (e) {
+                            console.error('[AI Agent] Failed to load chat:', e);
+                        }
+                        return;
+
+                    case "delete-chat":
+                        try {
+                            const payload = typeof message.text === 'string' ? JSON.parse(message.text) : message;
+                            const delId = payload.chatId;
+                            this._conversations = this._conversations.filter(c => c.id !== delId);
+                            if (this._activeConversationId === delId) {
+                                // If deleted active, switch to first or new
+                                if (this._conversations.length > 0) {
+                                    this._activeConversationId = this._conversations[0].id;
+                                    const nextChat = this._conversations[0];
+                                    webview.postMessage({
+                                        command: 'restore-history',
+                                        messages: nextChat.messages
+                                    });
+                                } else {
+                                    this._createNewChat(); // Will update UI implies
+                                    webview.postMessage({
+                                        command: 'restore-history',
+                                        messages: []
+                                    });
+                                }
+                            }
+                            this._saveConversations();
+                            webview.postMessage({
+                                command: 'update-conversation-list',
+                                conversations: this._conversations.map(c => ({ id: c.id, title: c.title, timestamp: c.timestamp })),
+                                activeId: this._activeConversationId
+                            });
+                        } catch (e) {
+                            console.error('[AI Agent] Failed to delete chat:', e);
+                        }
+                        return;
+
                     case "refresh-files":
                         if (this._projectIndexer) {
                             this._projectIndexer.scanFiles().then(state => {
@@ -181,9 +403,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
                         }
                         return;
                     case "clear-history":
-                        this._chatHistory = [];
-                        this._conversationHistory = [];
-                        this._saveChatHistory();
+                        if (this._activeChat) {
+                            this._activeChat.messages = [];
+                            this._saveConversations();
+                        }
                         return;
                     case "stop-generation":
                         const aborted = this._llmService.abort();
@@ -250,19 +473,33 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
                 }
             }
 
-            // Generate system prompt
-            const promptGenerator = new SystemPromptGenerator(projectState);
+            // Generate system prompt with workspace root for skill loading
+            const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+            const promptGenerator = new SystemPromptGenerator(projectState, workspaceRoot);
             const systemPrompt = promptGenerator.generate(this._currentMode, this._selectedFiles);
 
             // Build messages for LLM
+            // Convert stored ChatMessages to ConversationMessages (context)
+            const historyContext: ConversationMessage[] = (this._activeChat?.messages || [])
+                .filter(m => m.role === 'user' || m.role === 'system' || (m.role as any) === 'assistant')
+                .map(m => ({
+                    role: (m.role === 'tool' ? 'system' : m.role) as 'user' | 'system' | 'assistant',
+                    content: m.text
+                }));
+
+            // Keep only last 20 messages for context window
+            const recentContext = historyContext.slice(-20);
+
             const messages: ConversationMessage[] = [
                 { role: 'system', content: systemPrompt },
-                ...this._conversationHistory,
+                ...recentContext,
                 { role: 'user', content: text }
             ];
 
-            // Add user message to history
-            this._conversationHistory.push({ role: 'user', content: text });
+            // Add user message to history (storage)
+            // Note: _addToHistory is called above in handleUserMessage, so we don't need to push to storage here again
+            // But we need to update the in-memory context for the loop if we were using a persistent array, 
+            // but here 'messages' is local to this request.
 
             // Run the agentic loop
             await this.runAgentLoop(messages, webview);
@@ -422,13 +659,8 @@ Do not explain. Just output the JSON.`
                 continue; // Retry
             }
 
-            // Add to conversation history
-            this._conversationHistory.push({ role: 'assistant', content: fullResponse });
-
-            // Trim history if too long
-            if (this._conversationHistory.length > 20) {
-                this._conversationHistory = this._conversationHistory.slice(-16);
-            }
+            // Add to conversation history (for LLM context in next loop iteration)
+            messages.push({ role: 'assistant', content: fullResponse });
 
             // Send completion to UI and save to history
             webview.postMessage({
@@ -460,7 +692,10 @@ Do not explain. Just output the JSON.`
             switch (command.toLowerCase()) {
                 case '/clear':
                     webview.postMessage({ command: 'clear-chat' });
-                    this._conversationHistory = [];
+                    if (this._activeChat) {
+                        this._activeChat.messages = [];
+                        this._saveConversations();
+                    }
                     this._llmService.resetContext();
                     return;
 
@@ -492,7 +727,10 @@ Do not explain. Just output the JSON.`
 
                 case '/reset':
                     this._selectedFiles = {};
-                    this._conversationHistory = [];
+                    if (this._activeChat) {
+                        this._activeChat.messages = [];
+                        this._saveConversations();
+                    }
                     this._llmService.resetContext();
                     if (this._projectIndexer) {
                         await this._projectIndexer.scanFiles();

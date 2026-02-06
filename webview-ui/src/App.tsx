@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useVSCode } from './hooks/useVSCode';
 import { MODES, DEFAULT_MODEL } from './constants';
-import type { ApprovalData, Mode } from './types';
+import type { ApprovalData, Mode, Conversation } from './types';
 import {
   SendIcon,
   PlusIcon,
@@ -12,8 +12,13 @@ import {
   Dropdown,
   ContextMenu,
   FileAutocomplete,
-  SlashCommandPicker
+  SlashCommandPicker,
+
+  ChatHistory,
+  TaskGroupPanel
 } from './components';
+import type { TaskGroup } from './types/task-group';
+import { formatTimeAgo } from './utils/dateUtils';
 import './App.css';
 
 function App() {
@@ -35,11 +40,21 @@ function App() {
   // Approval State
   const [pendingApproval, setPendingApproval] = useState<ApprovalData | null>(null);
 
+  // Multi-Chat State
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [activeChatId, setActiveChatId] = useState<string>("");
+  const [showHistory, setShowHistory] = useState(false); // Start closed for drawer mode
+
+  // Task Group State
+  const [taskGroup, setTaskGroup] = useState<TaskGroup | null>(null);
+  const [sidebarTab, setSidebarTab] = useState<'history' | 'tasks'>('history');
+
   const chatEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Set model on mount
+  // Set model on mount and signal ready
   useEffect(() => {
+    postMessage("webview-ready", "");
     postMessage("setModel", DEFAULT_MODEL);
   }, []);
 
@@ -78,6 +93,18 @@ function App() {
         if (message.messages && Array.isArray(message.messages)) {
           setMessages(message.messages);
         }
+      }
+      if (message.command === 'update-conversation-list') {
+        setConversations(message.conversations || []);
+        if (message.activeId) {
+          setActiveChatId(message.activeId);
+        }
+      }
+      if (message.command === 'update-task-group') {
+        console.log('[AI Agent UI] Received task group update:', message.taskGroup);
+        setTaskGroup(message.taskGroup);
+        // Optional: Switch to tasks tab if a new group is created?
+        // setSidebarTab('tasks');
       }
     };
     window.addEventListener('message', handleMessage);
@@ -205,144 +232,241 @@ function App() {
     setIsLoading(false);
   }, [postMessage, setStreamingContent]);
 
+  // Chat Handlers
+  const handleNewChat = () => {
+    postMessage("new-chat", "");
+    setInputValue("");
+    if (window.innerWidth < 800) setShowHistory(false); // Auto-close on mobile
+  };
+
+  const handleSelectChat = (id: string) => {
+    postMessage("load-chat", JSON.stringify({ chatId: id }));
+    if (window.innerWidth < 800) setShowHistory(false);
+  };
+
+  const handleDeleteChat = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    postMessage("delete-chat", JSON.stringify({ chatId: id }));
+  };
+
   return (
     <div className="app-container">
-      {/* Chat Messages Area */}
-      <div className="chat-area">
-        <div className="chat-container">
-          {messages.length === 0 ? (
-            <div className="empty-state">
-              <h1>AI Agent</h1>
-              <p className="empty-state-hint">Ask me anything about your code, or try a quick action</p>
-              <div className="empty-state-shortcuts">
-                <span className="shortcut-chip" onClick={() => setInputValue('/status')}>📋 Git Status</span>
-                <span className="shortcut-chip" onClick={() => setInputValue('/diff')}>📊 View Diff</span>
-                <span className="shortcut-chip" onClick={() => setInputValue('create a ')}>✨ Create File</span>
-                <span className="shortcut-chip" onClick={() => setInputValue('/help')}>❓ Help</span>
-              </div>
-            </div>
-          ) : (
-            <>
-              {messages.map((msg, index) => (
-                <Message
-                  key={index}
-                  role={msg.role as 'user' | 'system' | 'tool'}
-                  text={msg.text || ''}
-                  command={msg.command}
-                  tool={msg.tool}
-                  result={msg.result}
-                />
-              ))}
-            </>
-          )}
+      {/* Sidebar */}
+      <div className={`sidebar-wrapper ${showHistory ? 'visible' : ''}`}>
 
-          {/* Streaming content */}
-          {streamingContent && (
-            <Message role="system" text={streamingContent} />
-          )}
-
-          {/* Thinking indicator */}
-          {isLoading && !streamingContent && !pendingApproval && <ThinkingIndicator />}
-
-          {/* Approval Request */}
-          {pendingApproval && (
-            <ApprovalRequest
-              tool={pendingApproval.tool}
-              filePath={pendingApproval.filePath}
-              oldContent={pendingApproval.oldContent}
-              newContent={pendingApproval.newContent}
-              oldString={pendingApproval.oldString}
-              newString={pendingApproval.newString}
-              onApprove={handleApprove}
-              onReject={handleReject}
-            />
-          )}
-
-          <div ref={chatEndRef} />
+        {/* Sidebar Tabs */}
+        <div style={{ display: 'flex', borderBottom: '1px solid var(--vscode-widget-border)' }}>
+          <button
+            onClick={() => setSidebarTab('history')}
+            style={{
+              flex: 1,
+              padding: '8px',
+              background: sidebarTab === 'history' ? 'var(--vscode-tab-activeBackground)' : 'transparent',
+              color: sidebarTab === 'history' ? 'var(--vscode-tab-activeForeground)' : 'var(--vscode-tab-inactiveForeground)',
+              border: 'none',
+              borderBottom: sidebarTab === 'history' ? '2px solid var(--vscode-tab-activeBorder)' : 'none',
+              cursor: 'pointer'
+            }}
+          >
+            History
+          </button>
+          <button
+            onClick={() => setSidebarTab('tasks')}
+            style={{
+              flex: 1,
+              padding: '8px',
+              background: sidebarTab === 'tasks' ? 'var(--vscode-tab-activeBackground)' : 'transparent',
+              color: sidebarTab === 'tasks' ? 'var(--vscode-tab-activeForeground)' : 'var(--vscode-tab-inactiveForeground)',
+              border: 'none',
+              borderBottom: sidebarTab === 'tasks' ? '2px solid var(--vscode-tab-activeBorder)' : 'none',
+              cursor: 'pointer'
+            }}
+          >
+            Tasks
+          </button>
         </div>
+
+        {sidebarTab === 'history' ? (
+          <ChatHistory
+            conversations={conversations}
+            activeId={activeChatId}
+            onSelect={handleSelectChat}
+            onNewChat={handleNewChat}
+            onDelete={handleDeleteChat}
+          />
+        ) : (
+          <TaskGroupPanel
+            taskGroup={taskGroup}
+            onCreateGroup={() => postMessage('create-task-group-request', '')}
+            onToggleSubtask={(id, completed) => postMessage('toggle-subtask', JSON.stringify({ groupId: taskGroup?.id, subtaskId: id, completed }))}
+          />
+        )}
       </div>
 
-      {/* Input Container */}
-      <div className="input-wrapper">
-        <div className="input-container">
+      <div className="main-content">
+        <div className="header-mobile-toggle">
+          <button onClick={() => setShowHistory(!showHistory)} className="icon-btn" title={showHistory ? "Close Menu" : "Open Menu"}>
+            {showHistory ? '✕' : '☰'}
+          </button>
+        </div>
 
-          <FileAutocomplete
-            files={files}
-            visible={showFilePicker}
-            filter={fileFilter}
-            onSelect={handleFileSelect}
-          />
+        {/* Chat Messages Area */}
+        <div className="chat-area">
+          <div className="chat-container">
+            {messages.length === 0 ? (
+              <div className="empty-state">
+                <div className="empty-state-content">
+                  <h1>Akku AI</h1>
 
-          <SlashCommandPicker
-            visible={showSlashPicker}
-            filter={slashFilter}
-            onSelect={handleSlashSelect}
-          />
+                  {/* Recent Activity List */}
+                  {conversations.length > 0 && (
+                    <div className="recent-activity">
+                      {conversations.slice(0, 5).map(chat => (
+                        <div
+                          key={chat.id}
+                          className="recent-item"
+                          onClick={() => handleSelectChat(chat.id)}
+                        >
+                          <span className="recent-title">{chat.title || "New Chat"}</span>
+                          <span className="recent-time">{formatTimeAgo(chat.timestamp)}</span>
+                        </div>
+                      ))}
+                      <div className="recent-footer">
+                        <span className="see-all-link" onClick={() => setShowHistory(true)}>See all</span>
+                      </div>
+                    </div>
+                  )}
 
-          <textarea
-            ref={textareaRef}
-            className="chat-input"
-            value={inputValue}
-            onChange={handleInputChange}
-            onKeyDown={handleKeyDown}
-            placeholder="Ask anything... (Use @ to add context)"
-            rows={1}
-            disabled={isLoading}
-          />
-
-          <div className="input-footer">
-            <div className="input-actions-left">
-              {/* Context Menu Button */}
-              <div className="context-menu-container">
-                <button
-                  className={`icon-btn ${showContext ? 'active' : ''}`}
-                  title="Add Context"
-                  onClick={() => setShowContext(!showContext)}
-                >
-                  <PlusIcon />
-                </button>
-                <ContextMenu isOpen={showContext} onClose={() => setShowContext(false)} />
+                  {/* Disclaimer Footer */}
+                  <div className="empty-footer">
+                    <p>AI may make mistakes. Double-check all generated code.</p>
+                  </div>
+                </div>
               </div>
+            ) : (
+              <>
+                {messages.map((msg, index) => (
+                  <Message
+                    key={index}
+                    role={msg.role as 'user' | 'system' | 'tool'}
+                    text={msg.text || ''}
+                    command={msg.command}
+                    tool={msg.tool}
+                    result={msg.result}
+                  />
+                ))}
+              </>
+            )}
 
-              {/* Mode Dropdown */}
-              <Dropdown
-                label={mode.label}
-                items={MODES}
-                selectedId={mode.id}
-                onSelect={handleModeSelect}
+            {/* Streaming content */}
+            {streamingContent && (
+              <Message role="system" text={streamingContent} />
+            )}
+
+            {/* Thinking indicator */}
+            {isLoading && !streamingContent && !pendingApproval && <ThinkingIndicator />}
+
+            {/* Approval Request */}
+            {pendingApproval && (
+              <ApprovalRequest
+                tool={pendingApproval.tool}
+                filePath={pendingApproval.filePath}
+                oldContent={pendingApproval.oldContent}
+                newContent={pendingApproval.newContent}
+                oldString={pendingApproval.oldString}
+                newString={pendingApproval.newString}
+                onApprove={handleApprove}
+                onReject={handleReject}
               />
+            )}
 
-              {/* Model Badge */}
-              <div className="model-badge">
-                <span className="status-dot"></span>
-                <span>Qwen 3B</span>
+            <div ref={chatEndRef} />
+          </div>
+        </div>
+
+        {/* Input Container */}
+        <div className="input-wrapper">
+          <div className="input-container">
+
+            <FileAutocomplete
+              files={files}
+              visible={showFilePicker}
+              filter={fileFilter}
+              onSelect={handleFileSelect}
+            />
+
+            <SlashCommandPicker
+              visible={showSlashPicker}
+              filter={slashFilter}
+              onSelect={handleSlashSelect}
+            />
+
+            <textarea
+              ref={textareaRef}
+              className="chat-input"
+              value={inputValue}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              placeholder="Ask anything... (Use @ to add context)"
+              rows={1}
+              disabled={isLoading}
+            />
+
+            <div className="input-footer">
+              <div className="input-actions-left">
+                {/* Context Menu Button */}
+                <div className="context-menu-container">
+                  <button
+                    className={`icon-btn ${showContext ? 'active' : ''}`}
+                    title="Add Context"
+                    onClick={() => setShowContext(!showContext)}
+                  >
+                    <PlusIcon />
+                  </button>
+                  <ContextMenu isOpen={showContext} onClose={() => setShowContext(false)} />
+                </div>
+
+                {/* Mode Dropdown */}
+                <Dropdown
+                  label={mode.label}
+                  items={MODES}
+                  selectedId={mode.id}
+                  onSelect={handleModeSelect}
+                />
+
+                {/* Model Badge */}
+                <div className="model-badge">
+                  <span className="status-dot"></span>
+                  <span>Qwen 3B</span>
+                </div>
               </div>
-            </div>
 
-            <div className="input-actions-right">
-              {isLoading ? (
-                <button
-                  className="stop-btn"
-                  onClick={handleStop}
-                  title="Stop generation"
-                >
-                  <StopIcon />
-                </button>
-              ) : (
-                <button
-                  className="send-btn"
-                  onClick={handleSend}
-                  disabled={!inputValue.trim()}
-                  title="Send message"
-                >
-                  <SendIcon />
-                </button>
-              )}
+              <div className="input-actions-right">
+                {isLoading ? (
+                  <button
+                    className="stop-btn"
+                    onClick={handleStop}
+                    title="Stop generation"
+                  >
+                    <StopIcon />
+                  </button>
+                ) : (
+                  <button
+                    className="send-btn"
+                    onClick={handleSend}
+                    disabled={!inputValue.trim()}
+                    title="Send message"
+                  >
+                    <SendIcon />
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
       </div>
     </div>
+
   );
 }
 

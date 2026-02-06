@@ -2,7 +2,7 @@
   "name": "ai-agent",
   "version": "1.0.0",
   "description": "",
-  "displayName": "AI Coding Agent",
+  "displayName": "Akku AI",
   "publisher": "ai-agent",
   "scripts": {
     "vscode:prepublish": "npm run build",
@@ -31,8 +31,8 @@
       "activitybar": [
         {
           "id": "ai-agent-sidebar",
-          "title": "AI Agent",
-          "icon": "media/robot.svg"
+          "title": "Akku AI",
+          "icon": "media/logo.svg"
         }
       ]
     },
@@ -41,8 +41,8 @@
         {
           "type": "webview",
           "id": "ai-agent.chatView",
-          "name": "AI Agent Chat",
-          "icon": "media/robot.svg"
+          "name": "Akku AI Chat",
+          "icon": "media/logo.svg"
         }
       ]
     },
@@ -53,7 +53,7 @@
       },
       {
         "command": "ai-agent.setApiKey",
-        "title": "Set AI Agent API Key"
+        "title": "Set Akku AI API Key"
       },
       {
         "command": "ai-agent.createSnapshot",
@@ -61,16 +61,20 @@
       },
       {
         "command": "ai-agent.refreshTools",
-        "title": "AI Agent: Refresh Tools"
+        "title": "Akku AI: Refresh Tools"
+      },
+      {
+        "command": "ai-agent.createTaskGroup",
+        "title": "Akku AI: Create Task Group"
       }
     ],
     "configuration": {
-      "title": "AI Agent",
+      "title": "Akku AI",
       "properties": {
         "ai-agent.defaultModel": {
           "type": "string",
           "default": "google/gemini-2.0-flash-001",
-          "description": "Default model to use for AI Agent (OpenRouter model ID)"
+          "description": "Default model to use for Akku AI (OpenRouter model ID)"
         }
       }
     }
@@ -82,10 +86,15 @@
     "Other"
   ],
   "dependencies": {
+    "@types/sqlite3": "^3.1.11",
+    "@types/uuid": "^10.0.0",
     "fast-glob": "^3.3.3",
+    "gray-matter": "^4.0.3",
     "ignore": "^7.0.5",
     "openai": "^6.17.0",
-    "simple-git": "^3.30.0"
+    "simple-git": "^3.30.0",
+    "sqlite3": "^5.1.7",
+    "uuid": "^13.0.0"
   },
   "devDependencies": {
     "@types/node": "^25.2.0",

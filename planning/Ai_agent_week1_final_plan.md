@@ -1,374 +1,410 @@
-# VS Code AI Agent - Final Week 1 Plan
-## Incorporating Best Practices from Copilot, Claude Code & Cline
+# VS Code AI Agent - Week 1 Sprint Plan
+
+## 🎯 Week Goal
+**Deliver a working AI chat extension that can read files, edit code, run commands, and do basic git operations.**
 
 ---
 
-## 🎯 Vision
-**Build an AI coding agent that combines:**
-- **Copilot's** native VS Code feel & mode system
-- **Claude Code's** project understanding & checkpoints
-- **Cline's** human-in-loop safety & LLM flexibility
+## 📅 Day-by-Day Breakdown
 
 ---
 
-## 🏗️ Architecture Overview
+### Day 1: Project Setup & Extension Scaffold
+**Goal**: Running extension with empty sidebar panel
 
+#### Morning (4 hrs)
+- [ ] Initialize VS Code extension
+  ```bash
+  npx --package yo --package generator-code -- yo code
+  # Select: TypeScript, Webpack, name: "ai-agent"
+  ```
+- [ ] Set up project structure
+  ```
+  src/
+    extension.ts
+    agent/
+    tools/
+    services/
+    webview/
+  webview-ui/
+  ```
+- [ ] Configure build system (esbuild for faster builds)
+- [ ] Add essential dependencies
+  ```json
+  {
+    "@anthropic-ai/sdk": "latest",
+    "simple-git": "latest"
+  }
+  ```
+
+#### Afternoon (4 hrs)
+- [ ] Create sidebar webview provider
+- [ ] Basic HTML shell for chat UI
+- [ ] Message passing setup (extension ↔ webview)
+- [ ] Test: Extension loads, sidebar shows "Hello World"
+
+#### Deliverable
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    YOUR AI AGENT                             │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│  LAYER 1: PROJECT UNDERSTANDING (Claude Code style)         │
-│  ┌────────────────────────────────────────────────────┐     │
-│  │ • File tree indexing                               │     │
-│  │ • Dependency detection (package.json, etc.)        │     │
-│  │ • Framework detection (React, Vue, Express...)     │     │
-│  │ • Code style analysis                              │     │
-│  │ • Real-time file watching                          │     │
-│  └────────────────────────────────────────────────────┘     │
-│                                                              │
-│  LAYER 2: MODE SYSTEM (Copilot + Cline style)               │
-│  ┌────────────────────────────────────────────────────┐     │
-│  │ • PLAN mode (read-only, explore, think)            │     │
-│  │ • ACT mode (execute, edit, run commands)           │     │
-│  │ • ASK mode (Q&A, explanations)                     │     │
-│  └────────────────────────────────────────────────────┘     │
-│                                                              │
-│  LAYER 3: SAFETY SYSTEM (Cline style)                       │
-│  ┌────────────────────────────────────────────────────┐     │
-│  │ • User confirmation for dangerous ops              │     │
-│  │ • Path validation (anti-hallucination)             │     │
-│  │ • Workspace snapshots (rollback)                   │     │
-│  │ • Cost tracking                                    │     │
-│  └────────────────────────────────────────────────────┘     │
-│                                                              │
-│  LAYER 4: TOOL SYSTEM                                       │
-│  ┌────────────────────────────────────────────────────┐     │
-│  │ • File ops (read, write, edit, search, list)       │     │
-│  │ • Terminal (run commands, capture output)          │     │
-│  │ • Git (status, diff, add, commit, push, log)       │     │
-│  └────────────────────────────────────────────────────┘     │
-│                                                              │
-│  LAYER 5: LLM LAYER (OpenRouter - Cline style)              │
-│  ┌────────────────────────────────────────────────────┐     │
-│  │ • Multi-provider support                           │     │
-│  │ • Free model fallback                              │     │
-│  │ • Streaming responses                              │     │
-│  │ • Grounded system prompts                          │     │
-│  └────────────────────────────────────────────────────┘     │
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
+✅ Extension activates
+✅ Sidebar panel opens
+✅ Can send message from webview to extension (console.log proof)
 ```
 
 ---
 
-## 📅 Day-by-Day Plan
+### Day 2: Chat UI (Webview)
+**Goal**: Functional chat interface with message display
 
-### Day 1: Foundation + Project Indexer
-**Reference**: Claude Code's automatic project understanding
+#### Morning (4 hrs)
+- [ ] Set up React/Preact in webview-ui folder
+- [ ] Create components:
+  ```
+  components/
+    ChatContainer.tsx    # Main wrapper
+    MessageList.tsx      # Scrollable message area
+    MessageItem.tsx      # Single message bubble
+    InputArea.tsx        # Text input + send button
+  ```
+- [ ] Style with Tailwind or VS Code theme variables
+- [ ] Message state management (useReducer)
 
-| Time | Task | Reference |
-|------|------|-----------|
-| Morning | Extension scaffold, project structure | - |
-| Morning | Project Indexer: file scanner | Claude Code |
-| Afternoon | Dependency parser (package.json, requirements.txt) | Claude Code |
-| Afternoon | Framework detector (React, Vue, Express...) | Claude Code |
-| Afternoon | Gitignore respect | Cline |
+#### Afternoon (4 hrs)
+- [ ] Markdown rendering (react-markdown)
+- [ ] Code block syntax highlighting (highlight.js or Prism)
+- [ ] Auto-scroll to bottom on new messages
+- [ ] Loading indicator component
+- [ ] Wire up send button → postMessage
 
-**Deliverables:**
-- Extension activates
-- Project indexed on startup
-- Knows: files, deps, framework, language
-
-**Key Insight from Research:**
-> Claude Code "analyzes your file structure & source code ASTs"
-> Cline "reads your file structure and analyzes your codebase"
-
----
-
-### Day 2: Chat UI + Mode System
-**Reference**: Copilot's modes + Cline's Plan/Act
-
-| Time | Task | Reference |
-|------|------|-----------|
-| Morning | Webview React setup | - |
-| Morning | Chat components (messages, input) | - |
-| Afternoon | **Mode selector** (Plan/Act/Ask) | Copilot + Cline |
-| Afternoon | Project context panel | Claude Code |
-| Afternoon | Markdown + code rendering | - |
-
-**Mode System Design:**
-
-| Mode | Behavior | Icon |
-|------|----------|------|
-| **Plan** | Read-only. Explore, ask questions, no changes. | 📋 |
-| **Act** | Execute. Edit files, run commands. | ⚡ |
-| **Ask** | Q&A only. No tools, just conversation. | 💬 |
-
-**Key Insight from Research:**
-> Cline's Plan & Act "separates strategic thinking from implementation"
-> Copilot has "Agent, Plan, Ask, and Edit" modes
-
----
-
-### Day 3: LLM + Grounded Prompts
-**Reference**: All three (context injection)
-
-| Time | Task | Reference |
-|------|------|-----------|
-| Morning | OpenRouter client setup | Cline |
-| Morning | API key configuration | - |
-| Afternoon | **Grounded system prompt builder** | Claude Code |
-| Afternoon | **Relevant file finder** | Copilot (@workspace) |
-| Afternoon | Streaming responses | - |
-
-**Grounded Prompt Structure:**
-
+#### Deliverable
 ```
-## PROJECT (This is TRUTH - do not hallucinate)
-Name: {name}
-Type: {type}
-Framework: {framework}
-
-## ACTUAL FILE STRUCTURE
-{file_tree}
-
-## INSTALLED DEPENDENCIES (Use ONLY these)
-{dependencies}
-
-## CURRENT CONTEXT
-File: {current_file}
-Selection: {selection}
-
-## RULES
-1. Only reference files that EXIST above
-2. Only use dependencies LISTED above
-3. Read files before editing
-4. Match project code style
+✅ Can type message and see it appear in chat
+✅ Messages styled nicely (user vs assistant)
+✅ Code blocks render with syntax highlighting
 ```
 
-**Key Insight from Research:**
-> Copilot "creates a contextual prompt by combining your prompt with workspace information, such as frameworks, languages, and dependencies"
-
 ---
 
-### Day 4: Tools + Validation Layer
-**Reference**: Cline's human-in-loop + validation
+### Day 3: LLM Integration
+**Goal**: Chat with Claude, streaming responses
 
-| Time | Task | Reference |
-|------|------|-----------|
-| Morning | Tool registry with validation | Cline |
-| Morning | File tools (read, write, edit, list, search) | All |
-| Afternoon | **Path validation** (anti-hallucination) | Custom |
-| Afternoon | **User confirmation flow** | Cline |
-| Afternoon | Tool call UI | Cline |
+#### Morning (4 hrs)
+- [ ] API key configuration
+  ```typescript
+  // Use VS Code settings
+  vscode.workspace.getConfiguration('aiAgent').get('anthropicApiKey')
+  // Or VS Code secret storage for security
+  context.secrets.store('anthropic-api-key', key)
+  ```
+- [ ] Claude SDK setup
+  ```typescript
+  import Anthropic from '@anthropic-ai/sdk';
+  
+  const client = new Anthropic({ apiKey });
+  ```
+- [ ] Basic chat completion (non-streaming first)
+- [ ] System prompt design
 
-**Validation Layer:**
+#### Afternoon (4 hrs)
+- [ ] Streaming implementation
+  ```typescript
+  const stream = await client.messages.stream({
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 4096,
+    messages: conversationHistory,
+  });
+  
+  for await (const chunk of stream) {
+    // Send chunk to webview
+  }
+  ```
+- [ ] Stream chunks to webview UI
+- [ ] Handle stream completion
+- [ ] Error handling (API errors, network issues)
+- [ ] Cancel request support
 
-| Tool | Validation | On Fail |
-|------|------------|---------|
-| read_file | Path must exist | Suggest similar files |
-| edit_file | Path exists + text found | Show current content |
-| write_file | Directory exists | Create directory? |
-| run_command | Safety whitelist | Ask confirmation |
-
-**Human-in-Loop Design (from Cline):**
-
+#### Deliverable
 ```
-┌─────────────────────────────────────────┐
-│  🔧 Agent wants to: edit_file           │
-│                                         │
-│  File: src/components/Header.tsx        │
-│  Change: Add login button               │
-│                                         │
-│  [Show Diff]  [Approve]  [Reject]       │
-└─────────────────────────────────────────┘
-```
-
-**Auto-Approve Settings (from Cline):**
-
-| Operation | Default |
-|-----------|---------|
-| Read files | Auto ✅ |
-| List directory | Auto ✅ |
-| Search code | Auto ✅ |
-| Write/Edit files | Ask ❓ |
-| Run commands | Ask ❓ |
-| Git operations | Ask ❓ |
-
-**Key Insight from Research:**
-> Cline "provides a human-in-the-loop GUI to approve every file change and terminal command"
-
----
-
-### Day 5: Terminal + Git
-**Reference**: Claude Code's git workflows
-
-| Time | Task | Reference |
-|------|------|-----------|
-| Morning | Terminal service | All |
-| Morning | run_command tool with safety | Cline |
-| Afternoon | Git service | Claude Code |
-| Afternoon | Git tools (status, diff, add, commit, push, log) | Claude Code |
-| Afternoon | **Cost tracking** | Cline |
-
-**Git Tools Design (from Claude Code):**
-
-| Tool | Purpose |
-|------|---------|
-| git_status | Show current status with nice formatting |
-| git_diff | Show changes (staged or unstaged) |
-| git_add | Stage files (with confirmation) |
-| git_commit | Create commit (suggest message) |
-| git_push | Push to remote (always confirm) |
-| git_log | Show recent history |
-
-**Cost Tracking (from Cline):**
-
-```
-┌─────────────────────────────────────────┐
-│  📊 Session Stats                       │
-│                                         │
-│  Tokens: 12,450 input / 3,200 output    │
-│  Cost: $0.02                            │
-│  Requests: 5                            │
-└─────────────────────────────────────────┘
+✅ Send message → Get Claude response
+✅ Response streams in real-time
+✅ Errors shown gracefully in UI
 ```
 
-**Key Insight from Research:**
-> Cline "keeps track of total tokens and API usage cost for the entire task loop"
-> Claude Code has strong git integration including auto PR reviews
+---
+
+### Day 4: Tool System + File Tools
+**Goal**: Agent can read and edit files
+
+#### Morning (4 hrs)
+- [ ] Tool registry pattern
+  ```typescript
+  interface Tool {
+    name: string;
+    description: string;
+    inputSchema: JSONSchema;
+    execute: (input: any) => Promise<ToolResult>;
+  }
+  
+  class ToolRegistry {
+    register(tool: Tool): void;
+    get(name: string): Tool;
+    getDefinitions(): ToolDefinition[]; // For LLM
+  }
+  ```
+- [ ] Implement file tools:
+  - `read_file` - Read file contents
+  - `list_directory` - List workspace files
+  - `write_file` - Create/overwrite file
+  - `edit_file` - Search & replace edits
+
+#### Afternoon (4 hrs)
+- [ ] Tool execution in agent loop
+  ```typescript
+  // Simplified agent loop
+  while (true) {
+    const response = await llm.chat(messages, tools);
+    
+    if (response.stopReason === 'tool_use') {
+      const results = await executeTools(response.toolCalls);
+      messages.push({ role: 'user', content: results });
+    } else {
+      break; // Final response
+    }
+  }
+  ```
+- [ ] Tool call UI component (show what tool is being used)
+- [ ] Tool result display in chat
+- [ ] Test: "Read my package.json" works
+
+#### Deliverable
+```
+✅ "What's in my package.json?" → Shows file contents
+✅ "Create a hello.js file" → File created
+✅ "Add a console.log to index.js" → File edited
+✅ Tool calls visible in chat UI
+```
 
 ---
 
-### Day 6: Snapshots + Polish
-**Reference**: Claude Code checkpoints + Cline snapshots
+### Day 5: Terminal + Git Tools
+**Goal**: Run commands and basic git operations
 
-| Time | Task | Reference |
-|------|------|-----------|
-| Morning | **Workspace snapshots** | Both |
-| Morning | Snapshot UI (compare, restore) | Cline |
-| Afternoon | Code style detection | Claude Code |
-| Afternoon | Conversation persistence | All |
-| Afternoon | Settings UI | - |
+#### Morning (4 hrs)
+- [ ] Terminal service
+  ```typescript
+  class TerminalService {
+    async runCommand(cmd: string, cwd?: string): Promise<{
+      stdout: string;
+      stderr: string;
+      exitCode: number;
+    }>;
+  }
+  ```
+- [ ] Implement `run_command` tool
+- [ ] Output capture and display
+- [ ] Timeout handling (prevent hanging)
+- [ ] Security: Basic command validation
 
-**Snapshot System (from Cline + Claude Code):**
+#### Afternoon (4 hrs)
+- [ ] Git service (using simple-git)
+  ```typescript
+  class GitService {
+    async status(): Promise<StatusResult>;
+    async diff(staged?: boolean): Promise<string>;
+    async add(files: string[]): Promise<void>;
+    async commit(message: string): Promise<void>;
+    async push(): Promise<void>;
+    async log(count: number): Promise<LogResult>;
+  }
+  ```
+- [ ] Git tools:
+  - `git_status` - Current status
+  - `git_diff` - Show changes
+  - `git_add` - Stage files
+  - `git_commit` - Commit with message
+  - `git_push` - Push to remote
+
+#### Deliverable
+```
+✅ "Run npm test" → Shows test output
+✅ "What's my git status?" → Shows changed files
+✅ "Commit these changes with message 'fix bug'" → Commits
+✅ "Push to origin" → Pushes
+```
+
+---
+
+### Day 6: Context & Polish
+**Goal**: Smart context awareness + UX improvements
+
+#### Morning (4 hrs)
+- [ ] Auto-include context in prompts:
+  - Current open file
+  - Selected text
+  - Workspace folder name
+  - Recently edited files
+- [ ] Improved system prompt with context
+  ```typescript
+  const systemPrompt = `You are an AI coding assistant.
+  
+  Current workspace: ${workspaceName}
+  Current file: ${activeFile || 'none'}
+  Selected text: ${selection || 'none'}
+  
+  Available tools: ...`;
+  ```
+- [ ] Token counting (avoid context overflow)
+
+#### Afternoon (4 hrs)
+- [ ] User confirmation for dangerous operations
+  - Delete file → "Are you sure?"
+  - Git push → "Push to origin/main?"
+  - Overwrite file → "File exists, overwrite?"
+- [ ] Better error messages
+- [ ] Conversation history persistence (workspace storage)
+- [ ] Clear chat / New conversation button
+- [ ] Copy code button on code blocks
+
+#### Deliverable
+```
+✅ Agent knows what file you have open
+✅ "Fix the bug in this function" works with selection
+✅ Dangerous operations ask for confirmation
+✅ Chat history survives extension reload
+```
+
+---
+
+### Day 7: Testing & Documentation
+**Goal**: Stable, documented, ready to use
+
+#### Morning (4 hrs)
+- [ ] End-to-end testing
+  - Chat flow
+  - Each tool individually
+  - Error scenarios
+  - Streaming interruption
+- [ ] Fix bugs found in testing
+- [ ] Performance check (response times)
+
+#### Afternoon (4 hrs)
+- [ ] README.md
+  - Features list
+  - Installation instructions
+  - Configuration (API key)
+  - Usage examples
+  - Screenshots/GIFs
+- [ ] CHANGELOG.md
+- [ ] Package for local install (.vsix)
+  ```bash
+  npx vsce package
+  ```
+- [ ] Optional: Record demo video
+
+#### Deliverable
+```
+✅ All features work reliably
+✅ Clear documentation
+✅ .vsix file ready to install
+✅ Demo ready to show
+```
+
+---
+
+## 📋 Tool Summary (End of Week 1)
+
+| Tool | Description | Status |
+|------|-------------|--------|
+| `read_file` | Read file contents | Day 4 |
+| `write_file` | Create/overwrite file | Day 4 |
+| `edit_file` | Search & replace edits | Day 4 |
+| `list_directory` | List workspace files | Day 4 |
+| `run_command` | Execute shell command | Day 5 |
+| `git_status` | Git status | Day 5 |
+| `git_diff` | Show git diff | Day 5 |
+| `git_add` | Stage files | Day 5 |
+| `git_commit` | Create commit | Day 5 |
+| `git_push` | Push to remote | Day 5 |
+
+---
+
+## 🛠️ Tech Stack (Final)
 
 ```
-┌─────────────────────────────────────────┐
-│  📸 Snapshots                           │
-│                                         │
-│  #3 - Added login button     [Compare]  │
-│  #2 - Created Header.tsx     [Restore]  │
-│  #1 - Initial state          [Restore]  │
-└─────────────────────────────────────────┘
+Extension Host:
+  - TypeScript
+  - VS Code Extension API
+  - @anthropic-ai/sdk
+  - simple-git
+  - esbuild (bundler)
+
+Webview UI:
+  - React 18 (or Preact for smaller bundle)
+  - TypeScript
+  - Tailwind CSS
+  - react-markdown
+  - highlight.js
+  - Vite (dev server)
 ```
 
-**Restore Options (from Claude Code):**
-- Restore code only
-- Restore conversation only
-- Restore both
+---
 
-**Key Insight from Research:**
-> Claude Code: "checkpoint system automatically saves your code state before each change, and you can instantly rewind"
-> Cline: "takes a snapshot of your workspace at each step"
+## ⚠️ Potential Blockers
+
+| Risk | Mitigation |
+|------|------------|
+| Streaming complexity | Start with non-streaming, add streaming after |
+| Webview message passing issues | Use VS Code's webview toolkit library |
+| Git operations failing | Fallback to shell commands via terminal |
+| Token limits | Truncate file contents, summarize context |
+| API rate limits | Add retry logic, backoff |
 
 ---
 
-### Day 7: Testing + Documentation
+## 🎯 Success Criteria (End of Week)
 
-| Time | Task |
-|------|------|
-| Morning | End-to-end testing |
-| Morning | Bug fixes |
-| Afternoon | README with screenshots |
-| Afternoon | Package .vsix |
-
-**Testing Checklist:**
-- [ ] Project indexing works
-- [ ] Modes switch correctly
-- [ ] Plan mode is read-only
-- [ ] Act mode requires confirmation
-- [ ] Path validation catches bad paths
-- [ ] Snapshots save and restore
-- [ ] Git operations work
-- [ ] Cost tracking accurate
-- [ ] Free model fallback works
+- [ ] Extension installs and runs without errors
+- [ ] Can have a conversation with Claude
+- [ ] Can read any file in workspace
+- [ ] Can create and edit files
+- [ ] Can run terminal commands
+- [ ] Can check git status and commit changes
+- [ ] UI is clean and responsive
+- [ ] Works offline gracefully (shows API error)
 
 ---
 
-## 🛠️ Feature Summary
+## 📊 Daily Standup Template
 
-### From Copilot Chat ✅
-| Feature | Status |
-|---------|--------|
-| Mode system (Plan/Act/Ask) | Day 2 |
-| Context mentions (@file) | Day 3 |
-| Native VS Code feel | Day 2 |
-| Inline chat | Future |
-
-### From Claude Code ✅
-| Feature | Status |
-|---------|--------|
-| Project understanding | Day 1 |
-| Grounded prompts | Day 3 |
-| Checkpoints/Snapshots | Day 6 |
-| Git workflows | Day 5 |
-| Subagents | Future |
-
-### From Cline ✅
-| Feature | Status |
-|---------|--------|
-| Plan/Act separation | Day 2 |
-| Human-in-loop approval | Day 4 |
-| Any LLM (OpenRouter) | Day 3 |
-| Cost tracking | Day 5 |
-| Workspace snapshots | Day 6 |
-| Browser automation | Future |
+```
+Yesterday: [What I completed]
+Today: [What I'm working on]
+Blockers: [Any issues]
+```
 
 ---
 
-## 📊 Success Metrics
+## 🚀 Quick Start Commands
 
-| Metric | Target | How to Measure |
-|--------|--------|----------------|
-| Hallucinated paths | < 5% | Validation errors |
-| Tool success rate | > 95% | Execution logs |
-| User confirmations | 100% on dangerous ops | UI tracking |
-| Snapshot restore | Works | Manual test |
-| Mode separation | Plan = no changes | Manual test |
+```bash
+# Day 1 - Initialize
+npx --package yo --package generator-code -- yo code
+cd ai-agent
+npm install @anthropic-ai/sdk simple-git
+npm run watch
 
----
+# Test extension
+Press F5 in VS Code
 
-## 🚀 Unique Value Proposition
+# Build webview
+cd webview-ui
+npm create vite@latest . -- --template react-ts
+npm install
+npm run dev
 
-**Your agent will combine the best of all three:**
-
-| Tool | Best Feature | You Get |
-|------|--------------|---------|
-| Copilot | Native feel, modes | ✅ |
-| Claude Code | Project understanding | ✅ |
-| Cline | Safety, flexibility | ✅ |
-
-**Plus your focus on anti-hallucination:**
-- Real file tree in every prompt
-- Path validation on every tool
-- Read-before-edit enforcement
-- Code style matching
+# Package extension
+npx vsce package
+```
 
 ---
 
-## 🎯 End of Week 1 Result
-
-A working AI agent that:
-1. **Understands your project** (files, deps, framework)
-2. **Has three modes** (Plan, Act, Ask)
-3. **Validates everything** (no hallucinated paths)
-4. **Asks permission** (human-in-loop)
-5. **Tracks costs** (budget awareness)
-6. **Can rollback** (snapshots)
-7. **Works with free models** (OpenRouter)
-
----
-
-*Ready to build! 🚀*
+*Let's build this! 🚀*

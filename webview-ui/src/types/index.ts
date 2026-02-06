@@ -30,3 +30,9 @@ export interface ApprovalData {
   oldString?: string;
   newString?: string;
 }
+
+export interface Conversation {
+  id: string;
+  title: string;
+  timestamp: number;
+}

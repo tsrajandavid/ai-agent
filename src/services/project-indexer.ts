@@ -11,8 +11,9 @@ export interface FileMetadata {
 }
 
 export interface ProjectState {
+    name: string;
     files: FileMetadata[];
-    dependencies: string[];
+    dependencies: Record<string, string>;
     frameworks: string[];
 }
 
@@ -73,7 +74,7 @@ export class ProjectIndexer {
         });
 
         const files: FileMetadata[] = [];
-        let dependencies: string[] = [];
+        let dependencies: Record<string, string> = {};
         let frameworks: string[] = [];
 
         for (const entry of entries) {
@@ -91,12 +92,13 @@ export class ProjectIndexer {
             // Parse package.json for dependencies and frameworks
             if (path.basename(entry.path) === 'package.json') {
                 const pkgInfo = this.parsePackageJson(path.join(this.workspaceRoot, entry.path));
-                dependencies = [...new Set([...dependencies, ...pkgInfo.dependencies])];
+                dependencies = { ...dependencies, ...pkgInfo.dependencies };
                 frameworks = [...new Set([...frameworks, ...pkgInfo.frameworks])];
             }
         }
 
         this.cache = {
+            name: path.basename(this.workspaceRoot),
             files,
             dependencies,
             frameworks
@@ -105,14 +107,13 @@ export class ProjectIndexer {
         return this.cache;
     }
 
-    private parsePackageJson(filePath: string): { dependencies: string[], frameworks: string[] } {
+    private parsePackageJson(filePath: string): { dependencies: Record<string, string>, frameworks: string[] } {
         try {
             const content = fs.readFileSync(filePath, 'utf-8');
             const pkg = JSON.parse(content);
             const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
-            const depList = Object.keys(allDeps);
-
             const detectedFrameworks: string[] = [];
+
             if (allDeps['react']) detectedFrameworks.push('React');
             if (allDeps['vue']) detectedFrameworks.push('Vue');
             if (allDeps['@angular/core']) detectedFrameworks.push('Angular');
@@ -121,12 +122,12 @@ export class ProjectIndexer {
             if (allDeps['svelte']) detectedFrameworks.push('Svelte');
 
             return {
-                dependencies: depList,
+                dependencies: allDeps,
                 frameworks: detectedFrameworks
             };
         } catch (e) {
             console.error(`Failed to parse ${filePath}:`, e);
-            return { dependencies: [], frameworks: [] };
+            return { dependencies: {}, frameworks: [] };
         }
     }
 

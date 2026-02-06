@@ -48,7 +48,7 @@ export class LLMService {
             baseURL: 'https://openrouter.ai/api/v1',
             defaultHeaders: {
                 'HTTP-Referer': 'https://github.com/tsrajandavid/ai-agent',
-                'X-Title': 'VS Code AI Agent',
+                'X-Title': 'Akku AI',
             },
         });
     }
