@@ -476,7 +476,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             // Generate system prompt with workspace root for skill loading
             const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
             const promptGenerator = new SystemPromptGenerator(projectState, workspaceRoot);
-            const systemPrompt = promptGenerator.generate(this._currentMode, this._selectedFiles);
 
             // Build messages for LLM
             // Convert stored ChatMessages to ConversationMessages (context)
@@ -486,6 +485,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
                     role: (m.role === 'tool' ? 'system' : m.role) as 'user' | 'system' | 'assistant',
                     content: m.text
                 }));
+
+            // Feed conversation history into memory for context tracking
+            promptGenerator.getMemory().extractFromMessages(historyContext);
+
+            // Generate system prompt with user query for context pruning
+            const systemPrompt = promptGenerator.generate(this._currentMode, this._selectedFiles, text);
 
             // Keep only last 20 messages for context window
             const recentContext = historyContext.slice(-20);

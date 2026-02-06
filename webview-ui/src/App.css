@@ -14,6 +14,7 @@
   --border-subtle: rgba(255, 255, 255, 0.06);
   --accent: #10a37f;
   --accent-hover: #1a7f64;
+  --accent-glow: rgba(16, 163, 127, 0.15);
   --user-bg: #2f2f2f;
   --radius-sm: 6px;
   --radius-md: 12px;
@@ -113,8 +114,13 @@
 }
 
 .chat-area::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.08);
   border-radius: 3px;
+  transition: background 0.2s;
+}
+
+.chat-area:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
 }
 
 .chat-container {
@@ -221,8 +227,10 @@
    ============================================ */
 .message {
   width: 100%;
-  padding: 24px 0;
+  padding: 20px 0;
   border-bottom: 1px solid var(--border-subtle);
+  animation: fadeIn 0.3s ease-out;
+  position: relative;
 }
 
 .message:last-child {
@@ -232,7 +240,7 @@
 .message.user {
   background: var(--user-bg);
   margin: 0 -24px;
-  padding: 24px;
+  padding: 20px 24px;
   width: calc(100% + 48px);
 }
 
@@ -552,7 +560,8 @@
 }
 
 .input-container:focus-within {
-  border-color: rgba(255, 255, 255, 0.2);
+  border-color: rgba(16, 163, 127, 0.4);
+  box-shadow: 0 0 0 2px var(--accent-glow);
 }
 
 .chat-input {
@@ -1214,3 +1223,162 @@
 .context-popup {
   animation: slideUp 0.15s ease-out;
 }
+
+/* ============================================
+   FADE-IN ANIMATION
+   ============================================ */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ============================================
+   SIDEBAR BACKDROP OVERLAY
+   ============================================ */
+.sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 99;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.sidebar-backdrop.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Sidebar tab pills */
+.sidebar-tab {
+  flex: 1;
+  padding: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  position: relative;
+  transition: color 0.2s;
+}
+
+.sidebar-tab:hover {
+  color: var(--text-secondary);
+}
+
+.sidebar-tab.active {
+  color: var(--text-primary);
+}
+
+.sidebar-tab.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 20%;
+  right: 20%;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+}
+
+/* ============================================
+   MESSAGE COPY BUTTON
+   ============================================ */
+.message-copy-btn {
+  position: absolute;
+  top: 12px;
+  right: 0;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.message:hover .message-copy-btn {
+  opacity: 1;
+}
+
+.message-copy-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+}
+
+.message-copy-btn.copied {
+  color: var(--accent);
+}
+
+/* ============================================
+   SUGGESTION CHIPS
+   ============================================ */
+.suggestion-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-start;
+}
+
+.suggestion-chip {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.suggestion-chip:hover {
+  background: var(--bg-elevated);
+  border-color: var(--accent);
+  color: var(--text-primary);
+  transform: translateY(-1px);
+}
+
+/* ============================================
+   STREAMING CURSOR
+   ============================================ */
+.streaming-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: var(--accent);
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: blink 1s steps(2) infinite;
+}
+
+@keyframes blink {
+  0% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* ============================================
+   SYNTAX HIGHLIGHTING
+   ============================================ */
+.token-keyword { color: #c678dd; }
+.token-string { color: #98c379; }
+.token-comment { color: #5c6370; font-style: italic; }
+.token-number { color: #d19a66; }
+.token-function { color: #61afef; }
+.token-operator { color: #56b6c2; }
+.token-type { color: #e5c07b; }
+.token-punctuation { color: #abb2bf; }

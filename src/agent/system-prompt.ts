@@ -1,15 +1,19 @@
 import { ProjectState } from '../services/project-indexer';
 import { SkillLoader } from './skill-loader';
 import { ProjectContextBuilder } from './project-context-builder';
+import { ConversationMemory } from './conversation-memory';
+import { ContextPruner } from './context-pruner';
 
 export type AgentMode = 'PLAN' | 'ACT' | 'ASK';
 
 export class SystemPromptGenerator {
     private contextBuilder: ProjectContextBuilder;
     private skillLoader: SkillLoader | null = null;
+    private conversationMemory: ConversationMemory;
 
     constructor(private readonly projectState: ProjectState, workspaceRoot?: string) {
-        this.contextBuilder = new ProjectContextBuilder(projectState);
+        this.contextBuilder = new ProjectContextBuilder(projectState, workspaceRoot);
+        this.conversationMemory = new ConversationMemory();
 
         // Initialize skill loader if workspace root is provided
         if (workspaceRoot) {
@@ -17,11 +21,22 @@ export class SystemPromptGenerator {
         }
     }
 
-    public generate(mode: AgentMode, contextFiles: Record<string, string> = {}): string {
+    /**
+     * Get the conversation memory instance for external use
+     */
+    public getMemory(): ConversationMemory {
+        return this.conversationMemory;
+    }
+
+    /**
+     * Generate system prompt with optional query-based context pruning
+     */
+    public generate(mode: AgentMode, contextFiles: Record<string, string> = {}, userQuery?: string): string {
         const sections = [
             this.buildIdentityLayer(),
             this.buildGoldenRulesLayer(),
             this.buildProjectContextLayer(contextFiles),
+            this.buildRelevantContextLayer(userQuery),
             this.buildToolsLayer(),
             this.buildToolUsageRulesLayer(),
             this.buildThinkingProtocolLayer(),
@@ -33,6 +48,7 @@ export class SystemPromptGenerator {
             this.buildProgressCommunicationLayer(),
             this.buildExamplesLayer(),
             this.buildRememberLayer(),
+            this.buildConversationMemoryLayer(),
             this.buildSkillsLayer()
         ];
 
@@ -615,6 +631,44 @@ COMPLEX TASKS (> 5 steps):
 ERROR COMMUNICATION:
   BAD: "Error occurred"
   GOOD: "npm install failed because package.json has a syntax error on line 15. Let me fix that first."`;
+    }
+
+    private buildRelevantContextLayer(userQuery?: string): string {
+        if (!userQuery) {
+            return '';
+        }
+
+        const pruned = ContextPruner.buildPrunedContext(userQuery, this.projectState);
+        if (!pruned.hasRelevantContext) {
+            return '';
+        }
+
+        const fileList = pruned.relevantFiles
+            .slice(0, 10)
+            .map(f => `  • ${f.path}`)
+            .join('\n');
+
+        const depList = Object.entries(pruned.relevantDeps)
+            .map(([name, version]) => `  • ${name}: ${version}`)
+            .join('\n');
+
+        let section = `
+══════════════════════════════════════════════════════════════════════════════
+                              RELEVANT TO YOUR QUERY
+══════════════════════════════════════════════════════════════════════════════
+
+Most relevant files:
+${fileList}`;
+
+        if (depList) {
+            section += `\n\nRelevant dependencies:\n${depList}`;
+        }
+
+        return section;
+    }
+
+    private buildConversationMemoryLayer(): string {
+        return this.conversationMemory.formatForPrompt();
     }
 
     private buildRememberLayer(): string {

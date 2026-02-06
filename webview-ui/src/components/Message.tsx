@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { ChevronIcon } from './Icons';
+import React, { useState, useCallback } from 'react';
+import { ChevronIcon, CopyIcon, CheckIcon } from './Icons';
 import { renderMarkdown } from './MarkdownRenderer';
 
 // Thinking Indicator Component
@@ -28,7 +28,7 @@ interface ToolMessageProps {
   isCall?: boolean;
 }
 
-export const ToolMessage = ({ tool, result, isCall }: ToolMessageProps) => {
+export const ToolMessage = React.memo(({ tool, result, isCall }: ToolMessageProps) => {
   const [expanded, setExpanded] = useState(!isCall);
 
   return (
@@ -51,7 +51,7 @@ export const ToolMessage = ({ tool, result, isCall }: ToolMessageProps) => {
       </div>
     </div>
   );
-};
+});
 
 // Main Message Component
 interface MessageProps {
@@ -62,7 +62,19 @@ interface MessageProps {
   result?: string;
 }
 
-export const Message = ({ role, text, command, tool, result }: MessageProps) => {
+export const Message = React.memo(({ role, text, command, tool, result }: MessageProps) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  }, [text]);
+
   // Handle tool messages
   if (role === 'tool' || command === 'tool-call' || command === 'tool-result') {
     return (
@@ -91,6 +103,15 @@ export const Message = ({ role, text, command, tool, result }: MessageProps) => 
           </div>
         </div>
       </div>
+      {!isUser && (
+        <button
+          className={`message-copy-btn ${copied ? 'copied' : ''}`}
+          onClick={handleCopy}
+          title="Copy message"
+        >
+          {copied ? <><CheckIcon /> Copied</> : <><CopyIcon /> Copy</>}
+        </button>
+      )}
     </div>
   );
-};
+});

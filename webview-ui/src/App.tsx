@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useVSCode } from './hooks/useVSCode';
 import { MODES, DEFAULT_MODEL } from './constants';
 import type { ApprovalData, Mode, Conversation } from './types';
@@ -20,6 +20,13 @@ import {
 import type { TaskGroup } from './types/task-group';
 import { formatTimeAgo } from './utils/dateUtils';
 import './App.css';
+
+const SUGGESTIONS = [
+  "Explain this code",
+  "Fix errors in this file",
+  "Write tests",
+  "Refactor for readability"
+];
 
 function App() {
   const { postMessage, messages, setMessages, streamingContent, setStreamingContent } = useVSCode();
@@ -43,7 +50,7 @@ function App() {
   // Multi-Chat State
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeChatId, setActiveChatId] = useState<string>("");
-  const [showHistory, setShowHistory] = useState(false); // Start closed for drawer mode
+  const [showHistory, setShowHistory] = useState(false);
 
   // Task Group State
   const [taskGroup, setTaskGroup] = useState<TaskGroup | null>(null);
@@ -51,6 +58,7 @@ function App() {
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const resizeTimerRef = useRef<number>(0);
 
   // Set model on mount and signal ready
   useEffect(() => {
@@ -103,8 +111,6 @@ function App() {
       if (message.command === 'update-task-group') {
         console.log('[AI Agent UI] Received task group update:', message.taskGroup);
         setTaskGroup(message.taskGroup);
-        // Optional: Switch to tasks tab if a new group is created?
-        // setSidebarTab('tasks');
       }
     };
     window.addEventListener('message', handleMessage);
@@ -116,7 +122,7 @@ function App() {
   }, []);
 
   // Handle Input Change for Autocomplete
-  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     setInputValue(val);
 
@@ -138,17 +144,16 @@ function App() {
     } else {
       setShowSlashPicker(false);
     }
-  };
+  }, []);
 
-  const handleSlashSelect = (cmd: string) => {
-    // For commands that need arguments, add a space
+  const handleSlashSelect = useCallback((cmd: string) => {
     const needsArg = ['/add', '/remove', '/run', '/commit'].includes(cmd);
     setInputValue(needsArg ? `${cmd} ` : cmd);
     setShowSlashPicker(false);
     textareaRef.current?.focus();
-  };
+  }, []);
 
-  const handleFileSelect = (file: string) => {
+  const handleFileSelect = useCallback((file: string) => {
     const match = inputValue.match(/@([\w/.-]*)$/);
     if (match) {
       const prefix = inputValue.substring(0, match.index);
@@ -157,19 +162,26 @@ function App() {
       setShowFilePicker(false);
       textareaRef.current?.focus();
     }
-  };
+  }, [inputValue]);
 
-  // Auto-scroll to bottom
+  // Auto-scroll to bottom using RAF for smoother scrolling
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    requestAnimationFrame(() => {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    });
   }, [messages, streamingContent, isLoading]);
 
-  // Auto-resize textarea
+  // Debounced auto-resize textarea
   useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
+    if (resizeTimerRef.current) {
+      cancelAnimationFrame(resizeTimerRef.current);
     }
+    resizeTimerRef.current = requestAnimationFrame(() => {
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+        textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
+      }
+    });
   }, [inputValue]);
 
   // Close popups on outside click
@@ -188,6 +200,37 @@ function App() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showContext, showFilePicker, showSlashPicker]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      const isCtrlOrCmd = e.ctrlKey || e.metaKey;
+
+      // Ctrl+L / Cmd+L: New chat
+      if (isCtrlOrCmd && e.key === 'l') {
+        e.preventDefault();
+        handleNewChat();
+        return;
+      }
+
+      // Ctrl+/ / Cmd+/: Focus input
+      if (isCtrlOrCmd && e.key === '/') {
+        e.preventDefault();
+        textareaRef.current?.focus();
+        return;
+      }
+
+      // Escape: Close sidebar and popups
+      if (e.key === 'Escape') {
+        if (showHistory) setShowHistory(false);
+        if (showContext) setShowContext(false);
+        if (showFilePicker) setShowFilePicker(false);
+        if (showSlashPicker) setShowSlashPicker(false);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [showHistory, showContext, showFilePicker, showSlashPicker]);
 
   const handleModeSelect = useCallback((newMode: Mode) => {
     setMode(newMode);
@@ -214,6 +257,12 @@ function App() {
     }
   }, [handleSend, showFilePicker]);
 
+  // Suggestion chip handler
+  const handleSuggestion = useCallback((suggestion: string) => {
+    setIsLoading(true);
+    postMessage("hello", suggestion);
+  }, [postMessage]);
+
   // Approval handlers
   const handleApprove = useCallback(() => {
     postMessage("approval-response", JSON.stringify({ approved: true }));
@@ -233,54 +282,50 @@ function App() {
   }, [postMessage, setStreamingContent]);
 
   // Chat Handlers
-  const handleNewChat = () => {
+  const handleNewChat = useCallback(() => {
     postMessage("new-chat", "");
     setInputValue("");
-    if (window.innerWidth < 800) setShowHistory(false); // Auto-close on mobile
-  };
+    if (window.innerWidth < 800) setShowHistory(false);
+  }, [postMessage]);
 
-  const handleSelectChat = (id: string) => {
+  const handleSelectChat = useCallback((id: string) => {
     postMessage("load-chat", JSON.stringify({ chatId: id }));
     if (window.innerWidth < 800) setShowHistory(false);
-  };
+  }, [postMessage]);
 
-  const handleDeleteChat = (id: string, e: React.MouseEvent) => {
+  const handleDeleteChat = useCallback((id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     postMessage("delete-chat", JSON.stringify({ chatId: id }));
-  };
+  }, [postMessage]);
+
+  // Memoize recent conversations for empty state
+  const recentConversations = useMemo(
+    () => conversations.slice(0, 5),
+    [conversations]
+  );
 
   return (
     <div className="app-container">
+      {/* Sidebar Backdrop */}
+      <div
+        className={`sidebar-backdrop ${showHistory ? 'visible' : ''}`}
+        onClick={() => setShowHistory(false)}
+      />
+
       {/* Sidebar */}
       <div className={`sidebar-wrapper ${showHistory ? 'visible' : ''}`}>
 
         {/* Sidebar Tabs */}
-        <div style={{ display: 'flex', borderBottom: '1px solid var(--vscode-widget-border)' }}>
+        <div style={{ display: 'flex', borderBottom: '1px solid var(--border-subtle)' }}>
           <button
+            className={`sidebar-tab ${sidebarTab === 'history' ? 'active' : ''}`}
             onClick={() => setSidebarTab('history')}
-            style={{
-              flex: 1,
-              padding: '8px',
-              background: sidebarTab === 'history' ? 'var(--vscode-tab-activeBackground)' : 'transparent',
-              color: sidebarTab === 'history' ? 'var(--vscode-tab-activeForeground)' : 'var(--vscode-tab-inactiveForeground)',
-              border: 'none',
-              borderBottom: sidebarTab === 'history' ? '2px solid var(--vscode-tab-activeBorder)' : 'none',
-              cursor: 'pointer'
-            }}
           >
             History
           </button>
           <button
+            className={`sidebar-tab ${sidebarTab === 'tasks' ? 'active' : ''}`}
             onClick={() => setSidebarTab('tasks')}
-            style={{
-              flex: 1,
-              padding: '8px',
-              background: sidebarTab === 'tasks' ? 'var(--vscode-tab-activeBackground)' : 'transparent',
-              color: sidebarTab === 'tasks' ? 'var(--vscode-tab-activeForeground)' : 'var(--vscode-tab-inactiveForeground)',
-              border: 'none',
-              borderBottom: sidebarTab === 'tasks' ? '2px solid var(--vscode-tab-activeBorder)' : 'none',
-              cursor: 'pointer'
-            }}
           >
             Tasks
           </button>
@@ -318,10 +363,23 @@ function App() {
                 <div className="empty-state-content">
                   <h1>Akku AI</h1>
 
+                  {/* Suggestion Chips */}
+                  <div className="suggestion-chips">
+                    {SUGGESTIONS.map(suggestion => (
+                      <button
+                        key={suggestion}
+                        className="suggestion-chip"
+                        onClick={() => handleSuggestion(suggestion)}
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
+
                   {/* Recent Activity List */}
-                  {conversations.length > 0 && (
+                  {recentConversations.length > 0 && (
                     <div className="recent-activity">
-                      {conversations.slice(0, 5).map(chat => (
+                      {recentConversations.map(chat => (
                         <div
                           key={chat.id}
                           className="recent-item"
@@ -358,9 +416,19 @@ function App() {
               </>
             )}
 
-            {/* Streaming content */}
+            {/* Streaming content with blinking cursor */}
             {streamingContent && (
-              <Message role="system" text={streamingContent} />
+              <div className="message system" style={{ animation: 'none' }}>
+                <div className="message-wrapper">
+                  <div className="message-avatar">AI</div>
+                  <div className="message-body">
+                    <div className="message-content">
+                      {streamingContent}
+                      <span className="streaming-cursor" />
+                    </div>
+                  </div>
+                </div>
+              </div>
             )}
 
             {/* Thinking indicator */}
