@@ -74,3 +74,95 @@ export class GitLogTool implements Tool {
         }
     }
 }
+
+export class GitAddTool implements Tool {
+    name = 'git_add';
+    description = 'Stage files for commit.';
+    parameters = {
+        type: 'object',
+        properties: {
+            files: { type: 'array', items: { type: 'string' }, description: 'Files to add (use ["."] for all)' }
+        },
+        required: ['files']
+    };
+    private git: SimpleGit;
+
+    constructor(private workspaceRoot: string) {
+        this.git = simpleGit(workspaceRoot);
+    }
+
+    async execute(args: any): Promise<string> {
+        try {
+            const files = args?.files || ['.'];
+            await this.git.add(files);
+            return `Staged files: ${files.join(', ')}`;
+        } catch (error: any) {
+            return `Error adding files: ${error.message}`;
+        }
+    }
+}
+
+export class GitCommitTool implements Tool {
+    name = 'git_commit';
+    description = 'Commit staged changes.';
+    parameters = {
+        type: 'object',
+        properties: {
+            message: { type: 'string', description: 'Commit message' }
+        },
+        required: ['message']
+    };
+    requiresConfirmation = true;
+    private git: SimpleGit;
+
+    constructor(private workspaceRoot: string) {
+        this.git = simpleGit(workspaceRoot);
+    }
+
+    async execute(args: any): Promise<string> {
+        try {
+            const message = args?.message;
+            if (!message) return 'Error: Commit message required';
+
+            const result = await this.git.commit(message);
+            return `Committed: ${result.summary.changes} changes. Hash: ${result.commit}`;
+        } catch (error: any) {
+            return `Error committing: ${error.message}`;
+        }
+    }
+}
+
+export class GitPushTool implements Tool {
+    name = 'git_push';
+    description = 'Push commits to remote.';
+    parameters = {
+        type: 'object',
+        properties: {
+            remote: { type: 'string', description: 'Remote name (default: origin)' },
+            branch: { type: 'string', description: 'Branch name (default: current)' }
+        },
+        required: []
+    };
+    requiresConfirmation = true;
+    private git: SimpleGit;
+
+    constructor(private workspaceRoot: string) {
+        this.git = simpleGit(workspaceRoot);
+    }
+
+    async execute(args: any): Promise<string> {
+        try {
+            const remote = args?.remote || 'origin';
+            const branch = args?.branch; // if undefined, pushes current
+
+            if (branch) {
+                await this.git.push(remote, branch);
+            } else {
+                await this.git.push(remote);
+            }
+            return `Pushed to ${remote}/${branch || 'current'}`;
+        } catch (error: any) {
+            return `Error pushing: ${error.message}`;
+        }
+    }
+}

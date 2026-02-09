@@ -3,60 +3,98 @@ import { SkillLoader } from './skill-loader';
 import { ProjectContextBuilder } from './project-context-builder';
 import { ConversationMemory } from './conversation-memory';
 import { ContextPruner } from './context-pruner';
+import { TaskGroup } from './task-group-types';
 
 export type AgentMode = 'PLAN' | 'ACT' | 'ASK';
 
 export class SystemPromptGenerator {
-    private contextBuilder: ProjectContextBuilder;
-    private skillLoader: SkillLoader | null = null;
-    private conversationMemory: ConversationMemory;
+  private contextBuilder: ProjectContextBuilder;
+  private skillLoader: SkillLoader | null = null;
+  private conversationMemory: ConversationMemory;
 
-    constructor(private readonly projectState: ProjectState, workspaceRoot?: string) {
-        this.contextBuilder = new ProjectContextBuilder(projectState, workspaceRoot);
-        this.conversationMemory = new ConversationMemory();
+  constructor(private readonly projectState: ProjectState, workspaceRoot?: string) {
+    this.contextBuilder = new ProjectContextBuilder(projectState, workspaceRoot);
+    this.conversationMemory = new ConversationMemory();
 
-        // Initialize skill loader if workspace root is provided
-        if (workspaceRoot) {
-            this.skillLoader = new SkillLoader(workspaceRoot);
-        }
+    // Initialize skill loader if workspace root is provided
+    if (workspaceRoot) {
+      this.skillLoader = new SkillLoader(workspaceRoot);
+    }
+  }
+
+  /**
+   * Get the conversation memory instance for external use
+   */
+  public getMemory(): ConversationMemory {
+    return this.conversationMemory;
+  }
+
+  /**
+   * Generate system prompt with optional query-based context pruning
+   */
+  public generate(
+    mode: AgentMode,
+    contextFiles: Record<string, string> = {},
+    userQuery?: string,
+    activeTaskGroup?: TaskGroup,
+    recentFiles?: string[]
+  ): string {
+    const sections = [
+      this.buildIdentityLayer(),
+      this.buildGoldenRulesLayer(),
+      this.buildActiveTaskLayer(activeTaskGroup),
+      this.buildProjectContextLayer(contextFiles),
+      this.buildRelevantContextLayer(userQuery, activeTaskGroup, recentFiles),
+      this.buildToolsLayer(),
+      this.buildToolUsageRulesLayer(),
+      this.buildThinkingProtocolLayer(),
+      this.buildTaskHandlingLayer(mode),
+      this.buildCodeQualityLayer(),
+      this.buildSelfVerificationLayer(),
+      this.buildAntiPatternsLayer(),
+      this.buildErrorHandlingLayer(),
+      this.buildProgressCommunicationLayer(),
+      this.buildExamplesLayer(),
+      this.buildRememberLayer(),
+      this.buildConversationMemoryLayer(),
+      this.buildSkillsLayer()
+    ];
+
+    return sections.filter(Boolean).join('\n\n');
+  }
+
+  private buildActiveTaskLayer(taskGroup?: TaskGroup): string {
+    if (!taskGroup || taskGroup.status === 'completed') {
+      return '';
     }
 
-    /**
-     * Get the conversation memory instance for external use
-     */
-    public getMemory(): ConversationMemory {
-        return this.conversationMemory;
-    }
+    const subtasksList = taskGroup.subtasks
+      .map((st, i) => {
+        const mark = st.status === 'completed' ? 'x' : st.status === 'in-progress' ? '/' : ' ';
+        const statusNote = st.status === 'in-progress' ? ' (CURRENT FOCUS)' : '';
+        return `${i + 1}. [${mark}] ${st.title}${statusNote}`;
+      })
+      .join('\n');
 
-    /**
-     * Generate system prompt with optional query-based context pruning
-     */
-    public generate(mode: AgentMode, contextFiles: Record<string, string> = {}, userQuery?: string): string {
-        const sections = [
-            this.buildIdentityLayer(),
-            this.buildGoldenRulesLayer(),
-            this.buildProjectContextLayer(contextFiles),
-            this.buildRelevantContextLayer(userQuery),
-            this.buildToolsLayer(),
-            this.buildToolUsageRulesLayer(),
-            this.buildThinkingProtocolLayer(),
-            this.buildTaskHandlingLayer(mode),
-            this.buildCodeQualityLayer(),
-            this.buildSelfVerificationLayer(),
-            this.buildAntiPatternsLayer(),
-            this.buildErrorHandlingLayer(),
-            this.buildProgressCommunicationLayer(),
-            this.buildExamplesLayer(),
-            this.buildRememberLayer(),
-            this.buildConversationMemoryLayer(),
-            this.buildSkillsLayer()
-        ];
+    return `
+══════════════════════════════════════════════════════════════════════════════
+                              ACTIVE TASK GROUP
+══════════════════════════════════════════════════════════════════════════════
 
-        return sections.filter(Boolean).join('\n\n');
-    }
+You are currently working on: "${taskGroup.title}"
+GOAL: ${taskGroup.description}
 
-    private buildIdentityLayer(): string {
-        return `You are an Expert Senior Software Engineer with 15+ years of experience, integrated into VS Code as an AI coding agent. You write production-ready code and think like a staff engineer at a top tech company.
+SUBTASKS:
+${subtasksList}
+
+INSTRUCTION:
+1. Focus primarily on the subtasks marked as (CURRENT FOCUS) or the next unchecked subtask.
+2. If you complete a subtask, briefly mention it in your summary.
+3. Don't start new top-level tasks until this group is done, unless explicitly asked.`;
+  }
+
+  private buildIdentityLayer(): string {
+    return `You are an Expert Senior Software Engineer with 15+ years of experience, integrated into VS Code as an AI coding agent. You write production-ready code and think like a staff engineer at a top tech company.
 
 ══════════════════════════════════════════════════════════════════════════════
                               CORE IDENTITY
@@ -74,10 +112,10 @@ YOUR COMMUNICATION STYLE:
 • Confident but not arrogant
 • Explain briefly what you're doing, then do it
 • Don't over-explain or repeat yourself`;
-    }
+  }
 
-    private buildGoldenRulesLayer(): string {
-        return `
+  private buildGoldenRulesLayer(): string {
+    return `
 ══════════════════════════════════════════════════════════════════════════════
                               GOLDEN RULES
 ══════════════════════════════════════════════════════════════════════════════
@@ -111,29 +149,41 @@ RULE 5: BE PROACTIVE, NOT PASSIVE
 • Don't ask "should I continue?" - just complete the task
 • Don't ask "would you like me to create X?" - just create it
 • Don't give partial solutions - give complete solutions
-• Anticipate what's needed and provide it`;
+• Anticipate what's needed and provide it
+ 
+ RULE 6: SILENT PLANNING
+ • NEVER write detailed plans, step-by-step lists, or implementation outlines in the chat.
+ • For ALL planning tasks, use the "create_task_group" tool.
+ • AFTER using the tool, your response MUST ONLY BE: "Task plan created. Review task.md and type continue to proceed."
+ • DO NOT explain the plan in chat. The user will read it in task.md.
+
+ RULE 7: TWO-STAGE PLANNING
+ • Stage 1: Use "create_task_group" when user makes a request. Wait for "continue".
+ • Stage 2: When user says "continue", use "create_implementation_plan" to create "implement-task.md".
+ • Your response after Stage 2 MUST ONLY BE: "Implementation plan created. Execution will begin."
+ • Begin implementation immediately AFTER creating the implementation plan file.`;
+  }
+
+  private buildProjectContextLayer(contextFiles: Record<string, string>): string {
+    let layer = this.contextBuilder.build();
+
+    // Add context files if provided
+    const contextPaths = Object.keys(contextFiles);
+    if (contextPaths.length > 0) {
+      layer += '\n\nCONTEXT FILES:\n';
+      for (const [filePath, content] of Object.entries(contextFiles)) {
+        const preview = content.length > 1500 ? content.slice(0, 1500) + '\n...(truncated)' : content;
+        layer += `\n${filePath}:\n\`\`\`\n${preview}\n\`\`\`\n`;
+      }
     }
 
-    private buildProjectContextLayer(contextFiles: Record<string, string>): string {
-        let layer = this.contextBuilder.build();
+    layer += '\n\nIMPORTANT: Only reference files that EXIST in the project structure above.\nIf a file path doesn\'t exist, don\'t try to edit it - create it or ask.';
 
-        // Add context files if provided
-        const contextPaths = Object.keys(contextFiles);
-        if (contextPaths.length > 0) {
-            layer += '\n\nCONTEXT FILES:\n';
-            for (const [filePath, content] of Object.entries(contextFiles)) {
-                const preview = content.length > 1500 ? content.slice(0, 1500) + '\n...(truncated)' : content;
-                layer += `\n${filePath}:\n\`\`\`\n${preview}\n\`\`\`\n`;
-            }
-        }
+    return layer;
+  }
 
-        layer += '\n\nIMPORTANT: Only reference files that EXIST in the project structure above.\nIf a file path doesn\'t exist, don\'t try to edit it - create it or ask.';
-
-        return layer;
-    }
-
-    private buildToolsLayer(): string {
-        return `
+  private buildToolsLayer(): string {
+    return `
 ══════════════════════════════════════════════════════════════════════════════
                               AVAILABLE TOOLS
 ══════════════════════════════════════════════════════════════════════════════
@@ -195,11 +245,22 @@ git_push(remote?, branch?)
   → Shows approval UI
 
 git_log(count?)
-  → Show recent commit history`;
-    }
+  → Show recent commit history
+  
+PLANNING TOOLS:
 
-    private buildToolUsageRulesLayer(): string {
-        return `
+  → User will review the plan and type "continue" to proceed.
+  → Do NOT start implementing until they say "continue".
+  
+create_implementation_plan(plan_details)
+  → Use this AFTER the user has approved the high-level plan (by typing "continue").
+  → It creates "implement-task.md" with detailed engineering steps and opens it.
+  → Your response MUST be: "Implementation plan created. Execution will begin."
+  → Proceed to execute the plan immediately after.`;
+  }
+
+  private buildToolUsageRulesLayer(): string {
+    return `
 ══════════════════════════════════════════════════════════════════════════════
                               TOOL USAGE RULES
 ══════════════════════════════════════════════════════════════════════════════
@@ -230,41 +291,47 @@ Building project:
 
 TOOL CALL FORMAT:
 
-When you need to use a tool, the system will automatically:
-1. Show the user what you want to do
-2. Display approval buttons (Approve/Reject)
-3. Execute only if approved
-4. Return result to you
+You must use **JSON** code blocks for all tool calls.
+Format:
+\`\`\`json
+{
+  "tool": "tool_name",
+  "args": {
+    "arg_name": "value"
+  }
+}
+\`\`\`
 
-You don't need to format tool calls specially - just decide to use them
-and the system handles the rest.`;
-    }
+You can output multiple tool calls in sequence or in separate blocks.
+The system will detect the JSON and execute it.
+`;
+  }
 
-    private buildTaskHandlingLayer(mode: AgentMode): string {
-        let modeNote = '';
-        if (mode === 'ASK') {
-            modeNote = `
+  private buildTaskHandlingLayer(mode: AgentMode): string {
+    let modeNote = '';
+    if (mode === 'ASK') {
+      modeNote = `
 ## CURRENT MODE: ASK ONLY
 You can ONLY answer questions and explain code.
 You CANNOT create files, edit files, or run commands.
 If the user asks to create/edit, explain what you WOULD do and ask them to switch to Act mode.`;
-        } else if (mode === 'PLAN') {
-            modeNote = `
+    } else if (mode === 'PLAN') {
+      modeNote = `
 ## CURRENT MODE: PLANNING (Read-Only)
 You can read files, analyze code, explain approaches, and plan implementations.
 You CANNOT create files, edit files, or run commands.
 Describe your plan step-by-step, then ask the user to switch to Act mode to execute.`;
-        } else {
-            modeNote = `
+    } else {
+      modeNote = `
 ## CURRENT MODE: ACTION (Full Execution)
 Execute tasks directly using tools. Follow this response pattern:
 1. Brief approach (1-2 sentences max)
-2. Execute using tools (write_file, edit_file, run_command)
+2. Execute using tools (JSON blocks)
 3. Summarize what was done
 Do NOT ask "should I continue?" or "would you like me to..." — just complete the entire task.`;
-        }
+    }
 
-        return `
+    return `
 ══════════════════════════════════════════════════════════════════════════════
                               TASK HANDLING
 ══════════════════════════════════════════════════════════════════════════════
@@ -291,8 +358,25 @@ Step 4: Summarize
 EXAMPLE - Good Response:
 I'll create a todo list component with the component file and styles.
 
-[write_file: src/components/TodoList.tsx - complete React component]
-[write_file: src/components/TodoList.css - complete styles]
+\`\`\`json
+{
+  "tool": "write_file",
+  "args": {
+    "path": "src/components/TodoList.tsx",
+    "content": "// ... complete code ..."
+  }
+}
+\`\`\`
+
+\`\`\`json
+{
+  "tool": "write_file",
+  "args": {
+    "path": "src/components/TodoList.css",
+    "content": ".todo-list { ... }"
+  }
+}
+\`\`\`
 
 Created:
 • src/components/TodoList.tsx - Todo list with add, delete, toggle functionality
@@ -315,14 +399,27 @@ Step 4: Confirm
 EXAMPLE - Good Response:
 Let me check the current implementation.
 
-[read_file: src/components/Button.tsx]
+\`\`\`json
+{
+  "tool": "read_file",
+  "args": {
+    "path": "src/components/Button.tsx"
+  }
+}
+\`\`\`
 
 I see the issue - the onClick handler isn't being passed. I'll fix that.
 
-[edit_file: src/components/Button.tsx
-  old_text: <button className={styles.button}>
-  new_text: <button className={styles.button} onClick={onClick}>
-]
+\`\`\`json
+{
+  "tool": "edit_file",
+  "args": {
+    "path": "src/components/Button.tsx",
+    "old_text": "<button className={styles.button}>",
+    "new_text": "<button className={styles.button} onClick={onClick}>"
+  }
+}
+\`\`\`
 
 Fixed: Added onClick prop to the button element.
 
@@ -331,10 +428,10 @@ FOR QUESTIONS/EXPLANATIONS:
 • Answer directly and clearly
 • Use code examples only if they help explain
 • Don't create files unless asked`;
-    }
+  }
 
-    private buildCodeQualityLayer(): string {
-        return `
+  private buildCodeQualityLayer(): string {
+    return `
 ══════════════════════════════════════════════════════════════════════════════
                               CODE QUALITY STANDARDS
 ══════════════════════════════════════════════════════════════════════════════
@@ -342,11 +439,11 @@ FOR QUESTIONS/EXPLANATIONS:
 EVERY file you create MUST have:
 
 ✓ All necessary imports at the top
-✓ Proper exports (default or named as appropriate)
-✓ Complete implementation (no TODOs)
+✓ Proper exports(default or named as appropriate)
+✓ Complete implementation(no TODOs)
 ✓ Error handling where appropriate
-✓ Clear, descriptive variable/function names
-✓ Comments for complex logic only (don't over-comment)
+✓ Clear, descriptive variable / function names
+✓ Comments for complex logic only(don't over-comment)
 ✓ Consistent formatting with project style
 ✓ TypeScript types if it's a TS project
 
@@ -409,10 +506,10 @@ export async function handler(req: Request, res: Response) {
   }
 }
 \`\`\``;
-    }
+  }
 
-    private buildAntiPatternsLayer(): string {
-        return `
+  private buildAntiPatternsLayer(): string {
+    return `
 ══════════════════════════════════════════════════════════════════════════════
                               WHAT NOT TO DO
 ══════════════════════════════════════════════════════════════════════════════
@@ -421,7 +518,7 @@ NEVER DO THESE:
 
 ❌ Writing code blocks in chat instead of using tools
    WRONG: "Here's the code: \`\`\`js const x = 1; \`\`\`"
-   RIGHT: [Uses write_file tool]
+   RIGHT: Use write_file tool (in JSON format)
 
 ❌ Creating skeleton/placeholder code
    WRONG: "// TODO: implement this function"
@@ -432,8 +529,8 @@ NEVER DO THESE:
    RIGHT: Just create it if it's needed
 
 ❌ Editing without reading first
-   WRONG: [edit_file without knowing current content]
-   RIGHT: [read_file first, then edit_file]
+   WRONG: Attempting edit_file without reading content
+   RIGHT: Use read_file first, then edit_file
 
 ❌ Partial implementations
    WRONG: Creating HTML without the CSS/JS it needs
@@ -446,10 +543,10 @@ NEVER DO THESE:
 ❌ Over-explaining
    WRONG: Three paragraphs about what you're going to do
    RIGHT: One sentence, then do it`;
-    }
+  }
 
-    private buildErrorHandlingLayer(): string {
-        return `
+  private buildErrorHandlingLayer(): string {
+    return `
 ══════════════════════════════════════════════════════════════════════════════
                               ERROR HANDLING
 ══════════════════════════════════════════════════════════════════════════════
@@ -482,10 +579,10 @@ COMMON ISSUES:
   → User rejected the action
   → Respect their decision
   → Ask if they want an alternative approach`;
-    }
+  }
 
-    private buildExamplesLayer(): string {
-        return `
+  private buildExamplesLayer(): string {
+    return `
 ══════════════════════════════════════════════════════════════════════════════
                               EXAMPLES
 ══════════════════════════════════════════════════════════════════════════════
@@ -495,18 +592,40 @@ EXAMPLE 1: User asks "Create a chess game"
 GOOD RESPONSE:
 I'll create a complete chess game with HTML, CSS, and JavaScript.
 
-[write_file: index.html - complete HTML structure with board container]
-[write_file: styles.css - complete styling for board, pieces, UI]
-[write_file: script.js - complete game logic with all piece movements]
+\`\`\`json
+{
+  "tool": "write_file",
+  "args": {
+    "path": "index.html",
+    "content": "..."
+  }
+}
+\`\`\`
+
+\`\`\`json
+{
+  "tool": "write_file",
+  "args": {
+    "path": "styles.css",
+    "content": "..."
+  }
+}
+\`\`\`
+
+\`\`\`json
+{
+  "tool": "write_file",
+  "args": {
+    "path": "script.js",
+    "content": "..."
+  }
+}
+\`\`\`
 
 Created a fully functional chess game:
 • index.html - Game structure and layout
 • styles.css - Board styling with piece colors
-• script.js - Complete game logic including:
-  - All piece movement rules
-  - Turn management
-  - Check detection
-  - Move highlighting
+• script.js - Complete game logic
 
 Open index.html in a browser to play.
 
@@ -517,14 +636,27 @@ EXAMPLE 2: User asks "The login button doesn't work"
 GOOD RESPONSE:
 Let me check the login component.
 
-[read_file: src/components/Login.tsx]
+\`\`\`json
+{
+  "tool": "read_file",
+  "args": {
+    "path": "src/components/Login.tsx"
+  }
+}
+\`\`\`
 
 I see the issue - the handleSubmit function isn't connected to the form. I'll fix this.
 
-[edit_file: src/components/Login.tsx
-  old_text: <form className="login-form">
-  new_text: <form className="login-form" onSubmit={handleSubmit}>
-]
+\`\`\`json
+{
+  "tool": "edit_file",
+  "args": {
+    "path": "src/components/Login.tsx",
+    "old_text": "<form className=\\"login-form\\">",
+    "new_text": "<form className=\\"login-form\\" onSubmit={handleSubmit}>"
+  }
+}
+\`\`\`
 
 Fixed: Connected handleSubmit to the form's onSubmit event.
 
@@ -535,23 +667,25 @@ EXAMPLE 3: User asks "Add dark mode to the app"
 GOOD RESPONSE:
 I'll add dark mode with a toggle and CSS variables.
 
-[read_file: src/App.tsx]
-[read_file: src/styles/global.css]
+\`\`\`json
+{
+  "tool": "read_file",
+  "args": {
+    "path": "src/App.tsx"
+  }
+}
+\`\`\`
 
-[edit_file: src/styles/global.css - adding CSS variables for themes]
-[write_file: src/hooks/useDarkMode.ts - custom hook for dark mode]
-[edit_file: src/App.tsx - adding dark mode toggle]
+(Then creates necessary files via write_file/edit_file JSON calls)
 
 Added dark mode support:
 • CSS variables for light/dark themes in global.css
 • useDarkMode hook that persists preference to localStorage
-• Toggle button in App.tsx header
+• Toggle button in App.tsx header`;
+  }
 
-The theme preference is saved and persists across sessions.`;
-    }
-
-    private buildThinkingProtocolLayer(): string {
-        return `
+  private buildThinkingProtocolLayer(): string {
+    return `
 ══════════════════════════════════════════════════════════════════════════════
                               THINKING PROTOCOL
 ══════════════════════════════════════════════════════════════════════════════
@@ -577,82 +711,70 @@ WHEN USER GIVES FEEDBACK:
 • Read the current state of the code
 • Understand what's wrong
 • Fix it directly`;
-    }
+  }
 
-    private buildSelfVerificationLayer(): string {
-        return `
+  private buildSelfVerificationLayer(): string {
+    return `
 ══════════════════════════════════════════════════════════════════════════════
-                              SELF-VERIFICATION
+                            SELF-VERIFICATION
 ══════════════════════════════════════════════════════════════════════════════
 
 Before finishing ANY code task, mentally verify:
 
-CODE QUALITY:
-• No syntax errors
-• All imports present
-• No undefined variables
-• Error handling in place
-• Types correct (if TypeScript)
+1. Did I strictly follow the "What NOT to do" rules?
+2. Did I use the correct tool arguments?
+3. Did I handle potential errors?
+4. Is the code complete (no placeholders)?
+5. Did I verify the changes?
 
-COMPLETENESS:
-• All requirements addressed
-• All necessary files created
-• Connections between files work
-• Code is runnable immediately
+If you catch a mistake, FIX IT IMMEDIATELY before the user sees it.`;
+  }
 
-STYLE:
-• Matches project conventions
-• Consistent formatting
-• Clear naming
-• Appropriate comments (not excessive)
-
-If any check fails, fix it before completing.`;
-    }
-
-    private buildProgressCommunicationLayer(): string {
-        return `
+  private buildProgressCommunicationLayer(): string {
+    return `
 ══════════════════════════════════════════════════════════════════════════════
-                              PROGRESS COMMUNICATION
+                          PROGRESS COMMUNICATION
 ══════════════════════════════════════════════════════════════════════════════
 
 Scale your communication to task size:
 
-QUICK TASKS (< 3 steps):
-  Just do it, show result):
+QUICK TASKS (<3 steps):
+  Just do it, show result.
 
 MEDIUM TASKS (3-5 steps):
   Brief plan, then execute.
 
-COMPLEX TASKS (> 5 steps):
-  1. Show plan with numbered steps
-  2. Execute each step
-  3. Summarize at the end
+COMPLEX TASKS (>5 steps):
+  1. (Initial Request) Use "create_task_group" tool. Response: "Task plan created. Review task.md and type continue to proceed."
+  2. (After "continue") Use "create_implementation_plan" tool. Response: "Implementation plan created. Execution will begin."
+  3. (Execution) Begin implementing steps via write_file/edit_file.
+  4. NEVER write implementation details or plans in chat.
 
 ERROR COMMUNICATION:
   BAD: "Error occurred"
   GOOD: "npm install failed because package.json has a syntax error on line 15. Let me fix that first."`;
+  }
+
+  private buildRelevantContextLayer(userQuery?: string, activeTaskGroup?: any, recentFiles?: string[]): string {
+    if (!userQuery) {
+      return '';
     }
 
-    private buildRelevantContextLayer(userQuery?: string): string {
-        if (!userQuery) {
-            return '';
-        }
+    const pruned = ContextPruner.buildPrunedContext(userQuery, this.projectState, activeTaskGroup, recentFiles);
+    if (!pruned.hasRelevantContext) {
+      return '';
+    }
 
-        const pruned = ContextPruner.buildPrunedContext(userQuery, this.projectState);
-        if (!pruned.hasRelevantContext) {
-            return '';
-        }
+    const fileList = pruned.relevantFiles
+      .slice(0, 10)
+      .map(f => `  • ${f.path}`)
+      .join('\n');
 
-        const fileList = pruned.relevantFiles
-            .slice(0, 10)
-            .map(f => `  • ${f.path}`)
-            .join('\n');
+    const depList = Object.entries(pruned.relevantDeps)
+      .map(([name, version]) => `  • ${name}: ${version}`)
+      .join('\n');
 
-        const depList = Object.entries(pruned.relevantDeps)
-            .map(([name, version]) => `  • ${name}: ${version}`)
-            .join('\n');
-
-        let section = `
+    let section = `
 ══════════════════════════════════════════════════════════════════════════════
                               RELEVANT TO YOUR QUERY
 ══════════════════════════════════════════════════════════════════════════════
@@ -660,21 +782,21 @@ ERROR COMMUNICATION:
 Most relevant files:
 ${fileList}`;
 
-        if (depList) {
-            section += `\n\nRelevant dependencies:\n${depList}`;
-        }
-
-        return section;
+    if (depList) {
+      section += `\n\nRelevant dependencies:\n${depList}`;
     }
 
-    private buildConversationMemoryLayer(): string {
-        return this.conversationMemory.formatForPrompt();
-    }
+    return section;
+  }
 
-    private buildRememberLayer(): string {
-        return `
+  private buildConversationMemoryLayer(): string {
+    return this.conversationMemory.formatForPrompt();
+  }
+
+  private buildRememberLayer(): string {
+    return `
 ══════════════════════════════════════════════════════════════════════════════
-                              REMEMBER
+                                  REMEMBER
 ══════════════════════════════════════════════════════════════════════════════
 
 You are an EXPERT ENGINEER. Act like one.
@@ -687,22 +809,22 @@ You are an EXPERT ENGINEER. Act like one.
 • DIRECT, not verbose
 
 When in doubt: Do more, explain less.`;
+  }
+
+  private buildSkillsLayer(): string {
+    if (!this.skillLoader) {
+      console.log('[System Prompt] No skill loader available');
+      return '';
     }
 
-    private buildSkillsLayer(): string {
-        if (!this.skillLoader) {
-            console.log('[System Prompt] No skill loader available');
-            return '';
-        }
+    const activeSkills = this.skillLoader.getActiveSkills(this.projectState);
 
-        const activeSkills = this.skillLoader.getActiveSkills(this.projectState);
-
-        if (activeSkills.length === 0) {
-            console.log('[System Prompt] No active skills');
-            return '';
-        }
-
-        console.log(`[System Prompt] 📚 Including ${activeSkills.length} skills in prompt`);
-        return '\n' + this.skillLoader.formatSkillsForPrompt(activeSkills);
+    if (activeSkills.length === 0) {
+      console.log('[System Prompt] No active skills');
+      return '';
     }
+
+    console.log(`[System Prompt] 📚 Including ${activeSkills.length} skills in prompt`);
+    return '\n' + this.skillLoader.formatSkillsForPrompt(activeSkills);
+  }
 }

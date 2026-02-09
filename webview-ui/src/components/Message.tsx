@@ -99,7 +99,7 @@ export const Message = React.memo(({ role, text, command, tool, result }: Messag
             <span className="message-role">{isUser ? 'You' : 'Assistant'}</span>
           </div>
           <div className="message-content">
-            {renderMarkdown(text)}
+            {renderMarkdown(text.replace(/<think>[\s\S]*?<\/think>/g, ''))}
           </div>
         </div>
       </div>

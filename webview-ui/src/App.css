@@ -33,6 +33,23 @@
 /* ============================================
    BASE LAYOUT - Drawer Style
    ============================================ */
+/* View Switcher Tabs */
+.view-tab {
+  background: transparent;
+  border: none;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  padding: 4px 8px;
+  font-size: 13px;
+  font-weight: 500;
+  border-bottom: 2px solid transparent;
+}
+
+.view-tab.active {
+  color: var(--vscode-foreground);
+  border-bottom-color: var(--vscode-focusBorder);
+}
+
 .app-container {
   display: flex;
   flex-direction: column;
@@ -695,6 +712,7 @@
   align-items: center;
   gap: 6px;
   transition: all 0.15s ease;
+  max-width: 200px;
 }
 
 .dropdown-trigger:hover {
@@ -752,8 +770,12 @@
 .item-label {
   font-size: 14px;
   font-weight: 500;
+  font-weight: 500;
   color: var(--text-primary);
   margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .item-desc {
@@ -1232,6 +1254,7 @@
     opacity: 0;
     transform: translateY(4px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -1367,18 +1390,47 @@
 }
 
 @keyframes blink {
-  0% { opacity: 1; }
-  50% { opacity: 0; }
+  0% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0;
+  }
 }
 
 /* ============================================
    SYNTAX HIGHLIGHTING
    ============================================ */
-.token-keyword { color: #c678dd; }
-.token-string { color: #98c379; }
-.token-comment { color: #5c6370; font-style: italic; }
-.token-number { color: #d19a66; }
-.token-function { color: #61afef; }
-.token-operator { color: #56b6c2; }
-.token-type { color: #e5c07b; }
-.token-punctuation { color: #abb2bf; }
+.token-keyword {
+  color: #c678dd;
+}
+
+.token-string {
+  color: #98c379;
+}
+
+.token-comment {
+  color: #5c6370;
+  font-style: italic;
+}
+
+.token-number {
+  color: #d19a66;
+}
+
+.token-function {
+  color: #61afef;
+}
+
+.token-operator {
+  color: #56b6c2;
+}
+
+.token-type {
+  color: #e5c07b;
+}
+
+.token-punctuation {
+  color: #abb2bf;
+}

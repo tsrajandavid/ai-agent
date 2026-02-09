@@ -56,6 +56,14 @@
         "title": "Set Akku AI API Key"
       },
       {
+        "command": "ai-agent.setGoogleApiKey",
+        "title": "Set Google Gemini API Key"
+      },
+      {
+        "command": "ai-agent.setGroqApiKey",
+        "title": "Set Groq API Key"
+      },
+      {
         "command": "ai-agent.createSnapshot",
         "title": "Create Project Snapshot"
       },
@@ -66,6 +74,10 @@
       {
         "command": "ai-agent.createTaskGroup",
         "title": "Akku AI: Create Task Group"
+      },
+      {
+        "command": "ai-agent.openTaskDashboard",
+        "title": "Task Dashboard"
       }
     ],
     "configuration": {
@@ -75,6 +87,21 @@
           "type": "string",
           "default": "google/gemini-2.0-flash-001",
           "description": "Default model to use for Akku AI (OpenRouter model ID)"
+        },
+        "ai-agent.openrouterApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "OpenRouter API Key for Akku AI"
+        },
+        "ai-agent.googleApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Google Gemini API Key for Akku AI"
+        },
+        "ai-agent.groqApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Groq API Key for Akku AI"
         }
       }
     }
@@ -93,7 +120,6 @@
     "ignore": "^7.0.5",
     "openai": "^6.17.0",
     "simple-git": "^3.30.0",
-    "sqlite3": "^5.1.7",
     "uuid": "^13.0.0"
   },
   "devDependencies": {

@@ -1,0 +1,110 @@
+.task-board {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background-color: var(--vscode-editor-background);
+}
+
+.task-board-header {
+    padding: 12px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--vscode-widget-border);
+    background-color: var(--vscode-sideBar-background);
+}
+
+.group-selector {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.group-select {
+    background: var(--vscode-dropdown-background);
+    color: var(--vscode-dropdown-foreground);
+    border: 1px solid var(--vscode-dropdown-border);
+    padding: 4px 8px;
+    border-radius: 4px;
+    outline: none;
+}
+
+.task-board-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--vscode-descriptionForeground);
+}
+
+.empty-content {
+    text-align: center;
+}
+
+.empty-content h3 {
+    margin-bottom: 8px;
+    color: var(--vscode-foreground);
+}
+
+.empty-content p {
+    margin-bottom: 16px;
+}
+
+/* Kanban Layout */
+.kanban-columns {
+    display: flex;
+    flex: 1;
+    overflow-x: auto;
+    padding: 16px;
+    gap: 16px;
+}
+
+.kanban-column {
+    flex: 1;
+    min-width: 250px;
+    background-color: var(--vscode-sideBar-background);
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--vscode-widget-border);
+}
+
+.column-header {
+    padding: 12px;
+    border-bottom: 1px solid var(--vscode-widget-border);
+    border-top: 3px solid transparent;
+    /* Colored by prop */
+    font-weight: 600;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+}
+
+.column-content {
+    flex: 1;
+    padding: 8px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.kanban-card {
+    background-color: var(--vscode-editor-background);
+    border: 1px solid var(--vscode-widget-border);
+    border-radius: 4px;
+    padding: 8px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.empty-column-placeholder {
+    text-align: center;
+    padding: 20px;
+    color: var(--vscode-disabledForeground);
+    font-size: 12px;
+    font-style: italic;
+}

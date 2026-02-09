@@ -8,9 +8,19 @@ export class ContextPruner {
     /**
      * Filter project files to those likely relevant to the user's query.
      */
-    public static findRelevantFiles(query: string, files: FileMetadata[]): FileMetadata[] {
+    public static findRelevantFiles(query: string, files: FileMetadata[], activeTaskGroup?: any, recentFiles?: string[]): FileMetadata[] {
         const queryLower = query.toLowerCase();
         const queryWords = queryLower.split(/\s+/).filter(w => w.length > 2);
+        const recentSet = new Set(recentFiles || []);
+
+        // Get active subtask context
+        const currentSubtask = activeTaskGroup?.subtasks?.find((s: any) => s.status === 'in-progress');
+        const assignedFiles = new Set(currentSubtask?.assignedFiles || []);
+
+        // Boost keywords from subtask title
+        const subtaskKeywords = currentSubtask?.title
+            ? currentSubtask.title.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3)
+            : [];
 
         // Score each file by relevance to the query
         const scored = files.map(file => {
@@ -19,15 +29,33 @@ export class ContextPruner {
             const fileName = pathLower.split(/[/\\]/).pop() || '';
             const baseName = fileName.replace(/\.\w+$/, '');
 
-            // Direct file mention in query
+            // 1. Direct file mention in query
             if (queryLower.includes(fileName) || queryLower.includes(baseName)) {
                 score += 10;
             }
 
-            // Query words match path segments
+            // 2. Query words match path segments
             for (const word of queryWords) {
                 if (pathLower.includes(word)) {
                     score += 3;
+                }
+            }
+
+            // 3. Task Group Weights (Phase 3 Feature)
+            // A. Explicitly assigned file (+20)
+            if (assignedFiles.has(file.path)) {
+                score += 20;
+            }
+
+            // B. Recent Activity (+15)
+            if (recentSet.has(file.path)) {
+                score += 15;
+            }
+
+            // B. Matches current subtask keywords (+8)
+            for (const word of subtaskKeywords) {
+                if (pathLower.includes(word)) {
+                    score += 8;
                 }
             }
 
@@ -53,6 +81,45 @@ export class ContextPruner {
 
             return { file, score };
         });
+
+        // 4. Import Tracing (Score > 10 triggers trace)
+        // We do a second pass to boost dependencies of high-scoring files
+        const highScoringFiles = scored.filter(s => s.score >= 10);
+        const boostMap = new Map<string, number>();
+
+        for (const s of highScoringFiles) {
+            if (s.file.imports && s.file.imports.length > 0) {
+                for (const imp of s.file.imports) {
+                    // Simple resolution
+                    let targetPath = '';
+                    if (imp.startsWith('.')) {
+                        const simpleName = imp.split(/[/\\]/).pop();
+                        if (simpleName) {
+                            targetPath = simpleName;
+                        }
+                    }
+
+                    if (targetPath) {
+                        // Find file that looks like this import
+                        const match = files.find(f => {
+                            const fName = f.path.split(/[/\\]/).pop()?.replace(/\.\w+$/, '');
+                            return fName === targetPath;
+                        });
+
+                        if (match) {
+                            boostMap.set(match.path, (boostMap.get(match.path) || 0) + 5);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Apply boosts
+        for (const s of scored) {
+            if (boostMap.has(s.file.path)) {
+                s.score += boostMap.get(s.file.path)!;
+            }
+        }
 
         // Return files with score > 0, sorted by relevance
         return scored
@@ -131,9 +198,11 @@ export class ContextPruner {
      */
     public static buildPrunedContext(
         query: string,
-        projectState: ProjectState
+        projectState: ProjectState,
+        activeTaskGroup?: any,
+        recentFiles?: string[]
     ): { relevantFiles: FileMetadata[]; relevantDeps: Record<string, string>; hasRelevantContext: boolean } {
-        const relevantFiles = this.findRelevantFiles(query, projectState.files);
+        const relevantFiles = this.findRelevantFiles(query, projectState.files, activeTaskGroup, recentFiles);
 
         if (relevantFiles.length === 0) {
             return {

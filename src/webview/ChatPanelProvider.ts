@@ -4,8 +4,19 @@ import { getNonce } from '../utilities/getNonce';
 import { LLMService } from '../llm/llm-service';
 import { ProjectIndexer } from '../services/project-indexer';
 import { SystemPromptGenerator, AgentMode } from '../agent/system-prompt';
+import { RunCommandTool } from '../tools/terminal-tools';
+import { TaskTools } from '../tools/task-tools';
+import { v4 as uuidv4 } from 'uuid';
 import { ToolManager } from '../tools/tool-manager';
 import { TaskGroupManager } from '../agent/task-group-manager';
+import { ChatStorage } from '../agent/storage/chat-storage';
+import { ContextAnalyzer } from '../agent/context-analyzer';
+import { JSONAdapter } from '../agent/storage/json-adapter';
+import { CommandRegistry } from '../commands/command-registry';
+import { PlanCommand } from '../commands/plan-command';
+import { AnalyzeCommand } from '../commands/analyze-command';
+import { GitCommitCommand, GitDiffCommand, GitStatusCommand, GitLogCommand } from '../commands/git-commands';
+import { ActionEngine } from '../agent/action-engine';
 
 interface WebviewMessage {
     command: string;
@@ -60,22 +71,173 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     private _currentMode: AgentMode = 'PLAN';
     private _selectedFiles: Record<string, string> = {};
     private _pendingApproval: PendingApproval | null = null;
+    private commandRegistry!: CommandRegistry;
+    private actionEngine: ActionEngine | undefined;
 
     // Multi-chat state
     private _conversations: Conversation[] = [];
     private _activeConversationId: string = '';
+    private _chatStorage: ChatStorage | undefined;
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
         private readonly _context: vscode.ExtensionContext,
         private readonly _llmService: LLMService,
-        private readonly _projectIndexer: ProjectIndexer | undefined,
+        private _projectIndexer: ProjectIndexer | undefined,
         private readonly _toolManager: ToolManager,
-        private readonly _taskGroupManager: TaskGroupManager | undefined,
+        private _taskGroupManager: TaskGroupManager | undefined,
         private readonly _ensureToolsRegistered: () => boolean
-    ) { }
+    ) {
+        this.registerCommands();
+        this._initializeAgentTools();
+        if (this._taskGroupManager) {
+            this.actionEngine = new ActionEngine(
+                this._taskGroupManager,
+                this._llmService,
+                (prompt) => this._executeAutoStep(prompt)
+            );
+        }
+    }
 
-    // ... resolveWebviewView (remains mostly same, but calls different load method)
+    private _initializeAgentTools() {
+        // Register standard tools
+        const runCommandTool = new RunCommandTool(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '');
+        this._toolManager.registerTool(runCommandTool);
+
+        if (this._taskGroupManager) {
+            const taskTools = new TaskTools(this._taskGroupManager);
+            taskTools.getTools().forEach((t: any) => this._toolManager.registerTool(t));
+        }
+    }
+
+    public setProjectIndexer(indexer: ProjectIndexer) {
+        this._projectIndexer = indexer;
+        this.registerCommands();
+        this._initializeAgentTools();
+        // Trigger initial scan and update UI
+        if (this._projectIndexer) {
+            this._projectIndexer.scanFiles().then(state => {
+                if (this._view) {
+                    this._view.webview.postMessage({
+                        command: 'update-file-list',
+                        files: state.files.map(f => f.path)
+                    });
+                }
+            });
+        }
+    }
+
+    public setTaskGroupManager(manager: TaskGroupManager) {
+        this._taskGroupManager = manager;
+        this.actionEngine = new ActionEngine(
+            manager,
+            this._llmService,
+            (prompt) => this._executeAutoStep(prompt)
+        );
+        this.registerCommands();
+        this._initializeAgentTools();
+
+        // Trigger initial task group update
+        if (this._taskGroupManager) {
+            this._taskGroupManager.getAll().then(groups => {
+                if (this._view) {
+                    this._view.webview.postMessage({
+                        command: 'update-task-list',
+                        taskGroups: groups,
+                        activeGroupId: groups.find(g => g.status === 'in-progress')?.id || groups[0]?.id
+                    });
+                }
+            });
+        }
+    }
+
+    private registerCommands() {
+        this.commandRegistry = new CommandRegistry();
+
+        // Register Plan Command
+        this.commandRegistry.register(new PlanCommand(this._taskGroupManager, (g) => this.updateTaskGroup(g)));
+
+        // Register Analyze Command
+        this.commandRegistry.register(new AnalyzeCommand(this._projectIndexer, this._llmService));
+
+        // Register Git Commands
+        if (this._toolManager) {
+            this.commandRegistry.register(new GitCommitCommand(this._toolManager));
+            this.commandRegistry.register(new GitDiffCommand(this._toolManager));
+            this.commandRegistry.register(new GitStatusCommand(this._toolManager));
+            this.commandRegistry.register(new GitLogCommand(this._toolManager));
+        }
+
+        // Register Resume Command
+        this.commandRegistry.register({
+            name: '/resume',
+            description: 'Resume auto-execution of the active plan',
+            execute: async (_args, webview) => {
+                if (!this.actionEngine) {
+                    webview.postMessage({ command: 'response-complete', text: '❌ Action Engine not initialized (No Task Manager)', role: 'system' });
+                    return;
+                }
+
+                // Get active group
+                const groups = await this._taskGroupManager?.getAll() || [];
+                const activeGroup = groups.find(g => g.status === 'in-progress');
+
+                if (!activeGroup) {
+                    webview.postMessage({ command: 'response-complete', text: 'SOURCE: No active plan found to resume.', role: 'system' });
+                    return;
+                }
+
+                webview.postMessage({ command: 'response-complete', text: `🚀 **Resuming Plan:** ${activeGroup.title}\n\nExecuting next step...`, role: 'system' });
+                this.actionEngine.resume();
+                this.runAutoExecutionLoop(activeGroup.id);
+            }
+        });
+
+        // Register Simple Commands (Clear, Help, Reset)
+        this.registerSimpleCommands();
+    }
+
+    private registerSimpleCommands() {
+        // Help
+        this.commandRegistry.register({
+            name: '/help',
+            description: 'Show help',
+            execute: async (_args, webview) => {
+                const commands = this.commandRegistry.getCommands().map(c => `- \`${c.name}\` - ${c.description}`).join('\n');
+                webview.postMessage({ command: 'response-complete', text: `### Available Commands\n\n${commands}`, role: 'system' });
+            }
+        });
+
+        // Clear
+        this.commandRegistry.register({
+            name: '/clear',
+            description: 'Clear chat history',
+            execute: async (_args, webview) => {
+                webview.postMessage({ command: 'clear-chat' });
+                if (this._activeChat) {
+                    this._activeChat.messages = [];
+                    this._saveConversations();
+                }
+                this._llmService.resetContext();
+            }
+        });
+
+        // Reset
+        this.commandRegistry.register({
+            name: '/reset',
+            description: 'Reset session',
+            execute: async (_args, webview) => {
+                this._selectedFiles = {};
+                if (this._activeChat) {
+                    this._activeChat.messages = [];
+                    this._saveConversations();
+                }
+                this._llmService.resetContext();
+                if (this._projectIndexer) await this._projectIndexer.scanFiles();
+                webview.postMessage({ command: 'response-complete', text: '✅ Reset complete', role: 'system' });
+            }
+        });
+    }
 
     public resolveWebviewView(
         webviewView: vscode.WebviewView,
@@ -110,34 +272,76 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    private _loadConversations() {
-        try {
-            // Check for new storage format
-            const storedConversations = this._context.globalState.get<Conversation[]>(CONVERSATIONS_KEY);
 
-            if (storedConversations && Array.isArray(storedConversations) && storedConversations.length > 0) {
-                this._conversations = storedConversations;
+
+    private async _loadConversations() {
+        try {
+            // Initialize storage if workspace available
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            if (workspaceFolders && workspaceFolders.length > 0) {
+                this._chatStorage = new ChatStorage(workspaceFolders[0].uri.fsPath);
+            }
+
+            let loadedFromStorage = false;
+            if (this._chatStorage) {
+                const stored = await this._chatStorage.getAll();
+                if (stored && stored.length > 0) {
+                    this._conversations = stored;
+                    loadedFromStorage = true;
+                }
+            }
+
+            if (loadedFromStorage) {
                 // Set active to most recent
-                this._conversations.sort((a, b) => b.timestamp - a.timestamp);
-                this._activeConversationId = this._conversations[0].id;
+                if (this._conversations.length > 0) {
+                    this._conversations.sort((a, b) => b.timestamp - a.timestamp);
+                    this._activeConversationId = this._conversations[0].id;
+                }
             } else {
-                // Migration path: Check for old history
-                const oldHistory = this._context.globalState.get<ChatMessage[]>(OLD_CHAT_HISTORY_KEY);
-                if (oldHistory && Array.isArray(oldHistory) && oldHistory.length > 0) {
-                    console.log('[AI Agent] Migrating old history to new conversation format');
-                    const migratedChat: Conversation = {
-                        id: Date.now().toString(),
-                        title: 'Previous Session',
-                        timestamp: Date.now(),
-                        messages: oldHistory
-                    };
-                    this._conversations = [migratedChat];
-                    this._activeConversationId = migratedChat.id;
+                // Migration path: Check for old globalState history
+                console.log('[AI Agent] No file history. Checking globalState...');
+                const storedConversations = this._context.globalState.get<Conversation[]>(CONVERSATIONS_KEY);
+
+                if (storedConversations && Array.isArray(storedConversations) && storedConversations.length > 0) {
+                    console.log('[AI Agent] Migrating globalState history to file storage');
+                    this._conversations = storedConversations;
+                    this._conversations.sort((a, b) => b.timestamp - a.timestamp);
+                    this._activeConversationId = this._conversations[0].id;
+                    // Persist to new storage immediately
                     this._saveConversations();
                 } else {
-                    // Start fresh
-                    this._createNewChat();
+                    // Check for even older single-chat history
+                    const oldHistory = this._context.globalState.get<ChatMessage[]>(OLD_CHAT_HISTORY_KEY);
+                    if (oldHistory && Array.isArray(oldHistory) && oldHistory.length > 0) {
+                        console.log('[AI Agent] Migrating legacy history to file storage');
+                        const migratedChat: Conversation = {
+                            id: Date.now().toString(),
+                            title: 'Previous Session',
+                            timestamp: Date.now(),
+                            messages: oldHistory
+                        };
+                        this._conversations = [migratedChat];
+                        this._activeConversationId = migratedChat.id;
+                        this._saveConversations();
+                    } else {
+                        // Start fresh
+                        console.log('[AI Agent] No history found. Starting fresh.');
+                        this._createNewChat();
+                    }
                 }
+            }
+
+            // Update UI after loading
+            if (this._view) {
+                this._view.webview.postMessage({
+                    command: 'restore-history',
+                    messages: this._activeChat?.messages || []
+                });
+                this._view.webview.postMessage({
+                    command: 'update-conversation-list',
+                    conversations: this._conversations.map(c => ({ id: c.id, title: c.title, timestamp: c.timestamp })),
+                    activeId: this._activeConversationId
+                });
             }
         } catch (e) {
             console.error('[AI Agent] Failed to load conversations:', e);
@@ -158,9 +362,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         return newChat;
     }
 
-    private _saveConversations() {
+    private async _saveConversations() {
         try {
-            this._context.globalState.update(CONVERSATIONS_KEY, this._conversations);
+            if (this._chatStorage) {
+                await this._chatStorage.saveAll(this._conversations);
+            } else {
+                // Fallback for no workspace
+                this._context.globalState.update(CONVERSATIONS_KEY, this._conversations);
+            }
         } catch (e) {
             console.error('[AI Agent] Failed to save conversations:', e);
         }
@@ -409,8 +618,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
                         }
                         return;
                     case "stop-generation":
-                        const aborted = this._llmService.abort();
-                        if (aborted) {
+                        this._llmService.abort();
+                        if (true) { // Show feedback even if Placeholder returns true
                             webview.postMessage({
                                 command: 'generation-stopped',
                                 text: '⏹️ Generation stopped',
@@ -439,6 +648,34 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         if (text.startsWith('/')) {
             await this.handleSlashCommand(text, webview);
             return;
+        }
+
+        // Handle 'continue' keyword as /resume
+        if (text.trim().toLowerCase() === 'continue') {
+            await this.handleSlashCommand('/resume', webview);
+            return;
+        }
+
+        // Auto-Detection for Complex Tasks
+        // If text > 15 chars (e.g., "create next app") AND contains triggers AND not already running a plan
+        const COMPLEX_TRIGGERS = ['build', 'create', 'implement', 'refactor', 'migrate', 'rewrite', 'design'];
+        const isComplex = text.length > 15 && COMPLEX_TRIGGERS.some(t => text.toLowerCase().includes(t));
+
+        // Only suggest if no active task group
+        let hasActiveGroup = false;
+        if (this._taskGroupManager) {
+            const groups = await this._taskGroupManager.getAll();
+            hasActiveGroup = !!(groups.find(g => g.status === 'in-progress'));
+        }
+
+        let isPlanRequest = false;
+        if (isComplex && !hasActiveGroup && this._taskGroupManager) {
+            isPlanRequest = true;
+            // Prepend a strict instruction that forbids chat output
+            text = `[STRICT PLAN REQUEST] Please use the "create_task_group" tool for this request. 
+YOUR FINAL RESPONSE MUST ONLY BE: "Task plan created. Review task.md and type continue to proceed."
+DO NOT write steps, plans, or code in this chat.
+User Request: ${text}`;
         }
 
         // Ensure tools are registered before processing
@@ -489,8 +726,18 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             // Feed conversation history into memory for context tracking
             promptGenerator.getMemory().extractFromMessages(historyContext);
 
+            // Get active task group
+            let activeTaskGroup;
+            if (this._taskGroupManager) {
+                const groups = await this._taskGroupManager.getAll();
+                activeTaskGroup = groups.find(g => g.status === 'in-progress') || groups.find(g => g.status === 'not-started');
+            }
+
+            // Capture recent files (visible editors)
+            const recentFiles = vscode.window.visibleTextEditors.map(editor => editor.document.uri.fsPath);
+
             // Generate system prompt with user query for context pruning
-            const systemPrompt = promptGenerator.generate(this._currentMode, this._selectedFiles, text);
+            const systemPrompt = promptGenerator.generate(this._currentMode, this._selectedFiles, text, activeTaskGroup, recentFiles);
 
             // Keep only last 20 messages for context window
             const recentContext = historyContext.slice(-20);
@@ -507,7 +754,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             // but here 'messages' is local to this request.
 
             // Run the agentic loop
-            await this.runAgentLoop(messages, webview);
+            await this.runAgentLoop(messages, webview, isPlanRequest);
 
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
@@ -523,7 +770,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     /**
      * The agentic loop - continues until no more tool calls
      */
-    private async runAgentLoop(messages: ConversationMessage[], webview: vscode.Webview) {
+    private async runAgentLoop(messages: ConversationMessage[], webview: vscode.Webview, isPlanRequest: boolean = false) {
         let iterations = 0;
 
         while (iterations < MAX_TOOL_ITERATIONS) {
@@ -534,13 +781,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             let fullResponse = '';
             await this._llmService.sendRequest(messages as any, (chunk) => {
                 fullResponse += chunk;
-                webview.postMessage({ command: "stream-chunk", chunk });
+                if (!isPlanRequest) {
+                    webview.postMessage({ command: "stream-chunk", chunk });
+                }
             });
 
             console.log('[AI Agent] LLM response length:', fullResponse.length);
             console.log('[AI Agent] LLM response preview:', fullResponse.slice(0, 500));
 
-            // Parse for tool calls
             const toolCall = this._toolManager.parseCommand(fullResponse);
 
             if (toolCall) {
@@ -690,142 +938,128 @@ Do not explain. Just output the JSON.`
      * Handle slash commands
      */
     private async handleSlashCommand(text: string, webview: vscode.Webview) {
-        const [command, ...args] = text.split(' ');
+        const [commandName, ...args] = text.split(' ');
         const argText = args.join(' ');
 
-        try {
-            switch (command.toLowerCase()) {
-                case '/clear':
-                    webview.postMessage({ command: 'clear-chat' });
-                    if (this._activeChat) {
-                        this._activeChat.messages = [];
-                        this._saveConversations();
+        // Try to execute via registry
+        const handled = await this.commandRegistry.execute(commandName, argText, webview);
+        if (handled) return;
+        // Legacy fallback or unknown command
+        webview.postMessage({ command: 'response-complete', text: `❌ Unknown command: ${commandName}`, role: 'system' });
+    }
+
+
+    /**
+     * Auto Execution Loop
+     * Iterates through the plan using ActionEngine
+     */
+    private async runAutoExecutionLoop(groupId: string) {
+        if (!this.actionEngine) return;
+
+        let keepGoing = true;
+        while (keepGoing) {
+            // Check if we should stop (e.g. paused)
+            // The ActionEngine checks its own paused state, but we also handle the result here.
+
+            try {
+                // Execute next step
+                // stepResult is true if it thinks we should continue, false if we should stop.
+                const stepResult = await this.actionEngine.executeNextStep(groupId);
+
+                if (!stepResult) {
+                    keepGoing = false;
+                    // Could be finished or paused/failed
+                    const group = await this._taskGroupManager?.get(groupId);
+                    if (group) {
+                        const pending = group.subtasks.filter(t => t.status === 'not-started');
+                        if (pending.length === 0) {
+                            this._view?.webview.postMessage({
+                                command: 'response-complete',
+                                text: `🎉 **Plan Complete:** ${group.title}\n\nAll tasks finished.`,
+                                role: 'system'
+                            });
+                        } else {
+                            // Paused or failed
+                            this._view?.webview.postMessage({
+                                command: 'response-complete',
+                                text: `⏸️ **Auto-Execution Paused.**`,
+                                role: 'system'
+                            });
+                        }
                     }
-                    this._llmService.resetContext();
-                    return;
+                }
+                // If stepResult is true, we loop again immediately
 
-                case '/help':
-                    const helpMessage = `### Available Commands
-
-**Git Commands:**
-- \`/commit [message]\` - Commit changes (AI generates message if not provided)
-- \`/diff\` - Show uncommitted changes
-- \`/status\` - Show git status
-- \`/log\` - Show recent commits
-
-**Project Commands:**
-- \`/test\` - Run tests
-- \`/build\` - Run build
-- \`/run <cmd>\` - Run shell command
-
-**Context Commands:**
-- \`/add <path>\` - Add file to context
-- \`/remove <path>\` - Remove file from context
-- \`/context\` - List files in context
-
-**Session Commands:**
-- \`/clear\` - Clear chat history
-- \`/reset\` - Reset everything
-- \`/help\` - Show this help`;
-                    webview.postMessage({ command: 'response-complete', text: helpMessage, role: 'system' });
-                    return;
-
-                case '/reset':
-                    this._selectedFiles = {};
-                    if (this._activeChat) {
-                        this._activeChat.messages = [];
-                        this._saveConversations();
-                    }
-                    this._llmService.resetContext();
-                    if (this._projectIndexer) {
-                        await this._projectIndexer.scanFiles();
-                    }
-                    webview.postMessage({ command: 'response-complete', text: '✅ Reset complete', role: 'system' });
-                    return;
-
-                case '/add':
-                    if (!argText) {
-                        webview.postMessage({ command: 'response-complete', text: '❌ Please specify a file path', role: 'system' });
-                        return;
-                    }
-                    await this.addFileToContext(argText, webview);
-                    return;
-
-                case '/remove':
-                    if (!argText) {
-                        webview.postMessage({ command: 'response-complete', text: '❌ Please specify a file path', role: 'system' });
-                        return;
-                    }
-                    if (this._selectedFiles[argText]) {
-                        delete this._selectedFiles[argText];
-                        webview.postMessage({ command: 'response-complete', text: `🗑️ Removed **${argText}** from context`, role: 'system' });
-                    } else {
-                        webview.postMessage({ command: 'response-complete', text: `❌ File not in context: ${argText}`, role: 'system' });
-                    }
-                    return;
-
-                case '/context':
-                    const files = Object.keys(this._selectedFiles);
-                    if (files.length === 0) {
-                        webview.postMessage({ command: 'response-complete', text: '📂 No files in context', role: 'system' });
-                    } else {
-                        webview.postMessage({
-                            command: 'response-complete',
-                            text: `### 📂 Active Context\n${files.map(f => `- ${f}`).join('\n')}`,
-                            role: 'system'
-                        });
-                    }
-                    return;
-
-                // Git Commands
-                case '/commit':
-                    await this.handleCommit(argText, webview);
-                    return;
-
-                case '/diff':
-                    await this.handleGitCommand('git_diff', 'Git Diff', webview);
-                    return;
-
-                case '/status':
-                    await this.handleGitCommand('git_status', 'Git Status', webview);
-                    return;
-
-                case '/log':
-                    await this.handleGitCommand('git_log', 'Git Log', webview);
-                    return;
-
-                // Project Commands
-                case '/test':
-                    await this.handleRunCommand('npm test', 'Running Tests', webview);
-                    return;
-
-                case '/build':
-                    await this.handleRunCommand('npm run build', 'Building Project', webview);
-                    return;
-
-                case '/run':
-                    if (!argText) {
-                        webview.postMessage({ command: 'response-complete', text: '❌ Please specify a command to run', role: 'system' });
-                        return;
-                    }
-                    await this.handleRunCommand(argText, `Running: ${argText}`, webview);
-                    return;
-
-                default:
-                    webview.postMessage({
-                        command: 'response-complete',
-                        text: `❌ Unknown command: ${command}\nType \`/help\` for available commands`,
-                        role: 'system'
-                    });
-                    return;
+            } catch (e) {
+                console.error('Auto execution error:', e);
+                keepGoing = false;
+                this._view?.webview.postMessage({
+                    command: 'response-complete',
+                    text: `❌ Error in auto-execution: ${e}`,
+                    role: 'system'
+                });
             }
-        } catch (error) {
-            console.error('[Slash Command Error]', error);
-            webview.postMessage({
-                command: 'response-complete',
-                text: `❌ Error: ${error instanceof Error ? error.message : String(error)}`,
-                role: 'system'
-            });
+        }
+    }
+
+    /**
+     * Helper for ActionEngine to runs a single agentic loop for a specific prompt
+     * Returns true if successful, false if failed/cancelled
+     */
+    private async _executeAutoStep(prompt: string): Promise<boolean> {
+        if (!this._view) return false;
+
+        console.log('[ChatPanelProvider] Executing Auto Step:', prompt.slice(0, 100) + '...');
+
+        // Create a temporary conversation context or just use the current one?
+        // Better to use current so the user sees the progress in the chat.
+
+        // 1. Send prompt to UI as if it were a system/assistant message announcing the task
+        this._view.webview.postMessage({ command: 'newMessage', text: `🤖 **Auto-Task:** ${prompt.split('\n')[2] || 'Executing step...'}`, role: 'assistant' });
+
+        // 2. Construct messages
+        // reuse logic from handleUserMessage but adapted
+
+        // Get project state (simplified)
+        let projectState: any = { files: [], frameworks: [], dependencies: [] };
+        if (this._projectIndexer) {
+            try { projectState = await this._projectIndexer.scanFiles(); } catch (e) { }
+        }
+
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const promptGenerator = new SystemPromptGenerator(projectState, workspaceRoot);
+
+        // Build context
+        const historyContext: ConversationMessage[] = (this._activeChat?.messages || [])
+            .filter(m => m.role === 'user' || m.role === 'system' || (m.role as any) === 'assistant')
+            .map(m => ({
+                role: (m.role === 'tool' ? 'system' : m.role) as 'user' | 'system' | 'assistant',
+                content: m.text
+            }));
+
+        let activeTaskGroup;
+        if (this._taskGroupManager) {
+            const groups = await this._taskGroupManager.getAll();
+            activeTaskGroup = groups.find(g => g.status === 'in-progress');
+        }
+
+        const recentFiles = vscode.window.visibleTextEditors.map(editor => editor.document.uri.fsPath);
+        const systemPrompt = promptGenerator.generate(this._currentMode, this._selectedFiles, prompt, activeTaskGroup, recentFiles);
+        const recentContext = historyContext.slice(-20);
+
+        const messages: ConversationMessage[] = [
+            { role: 'system', content: systemPrompt },
+            ...recentContext,
+            { role: 'user', content: prompt } // Using the prompt as the user input equivalent
+        ];
+
+        // 3. Run Agent Loop
+        try {
+            await this.runAgentLoop(messages, this._view.webview);
+            return true; // If we get here without throwing, we consider it a success (tools executed)
+        } catch (e) {
+            console.error('Agent loop failed:', e);
+            return false;
         }
     }
 
@@ -842,152 +1076,6 @@ Do not explain. Just output the JSON.`
             return await tool.execute(args);
         } catch (error) {
             return `Error executing ${command}: ${error}`;
-        }
-    }
-
-    /**
-     * Handle /commit command - creates a git commit
-     */
-    private async handleCommit(message: string, webview: vscode.Webview) {
-        if (!this._ensureToolsRegistered()) {
-            webview.postMessage({ command: 'response-complete', text: '❌ No workspace folder open', role: 'system' });
-            return;
-        }
-
-        try {
-            // First get the diff to show what's being committed
-            const diffResult = await this._executeToolDirect('git_diff', {});
-
-            if (diffResult.includes('No changes') || diffResult.includes('Error')) {
-                webview.postMessage({ command: 'response-complete', text: '📭 No changes to commit', role: 'system' });
-                return;
-            }
-
-            // If no message provided, ask AI to generate one
-            let commitMessage = message;
-            if (!commitMessage) {
-                webview.postMessage({ command: 'response-complete', text: '🤖 Generating commit message...', role: 'system' });
-
-                // Use LLM to generate commit message
-                const prompt = `Based on this git diff, generate a concise commit message (one line, max 72 chars). Only output the commit message, nothing else:\n\n${diffResult.slice(0, 2000)}`;
-
-                let generatedMessage = '';
-                await this._llmService.sendRequest(
-                    [{ role: 'user', content: prompt }] as any,
-                    (chunk) => { generatedMessage += chunk; }
-                );
-
-                commitMessage = generatedMessage.trim().replace(/^["']|["']$/g, '').split('\n')[0];
-            }
-
-            // Show what will be committed
-            webview.postMessage({
-                command: 'response-complete',
-                text: `### 📝 Commit Preview\n\n**Message:** ${commitMessage}\n\n**Changes:**\n\`\`\`diff\n${diffResult.slice(0, 1000)}${diffResult.length > 1000 ? '\n...(truncated)' : ''}\n\`\`\`\n\n*Run \`git commit -m "${commitMessage}"\` to commit*`,
-                role: 'system'
-            });
-
-        } catch (error) {
-            webview.postMessage({
-                command: 'response-complete',
-                text: `❌ Commit failed: ${error instanceof Error ? error.message : String(error)}`,
-                role: 'system'
-            });
-        }
-    }
-
-    /**
-     * Handle git commands (/diff, /status, /log)
-     */
-    private async handleGitCommand(toolName: string, title: string, webview: vscode.Webview) {
-        if (!this._ensureToolsRegistered()) {
-            webview.postMessage({ command: 'response-complete', text: '❌ No workspace folder open', role: 'system' });
-            return;
-        }
-
-        try {
-            webview.postMessage({ command: 'response-complete', text: `⏳ ${title}...`, role: 'system' });
-
-            const result = await this._executeToolDirect(toolName, {});
-
-            webview.postMessage({
-                command: 'response-complete',
-                text: `### ${title}\n\n\`\`\`\n${result}\n\`\`\``,
-                role: 'system'
-            });
-        } catch (error) {
-            webview.postMessage({
-                command: 'response-complete',
-                text: `❌ ${title} failed: ${error instanceof Error ? error.message : String(error)}`,
-                role: 'system'
-            });
-        }
-    }
-
-    /**
-     * Handle /run, /test, /build commands
-     */
-    private async handleRunCommand(cmd: string, title: string, webview: vscode.Webview) {
-        if (!this._ensureToolsRegistered()) {
-            webview.postMessage({ command: 'response-complete', text: '❌ No workspace folder open', role: 'system' });
-            return;
-        }
-
-        try {
-            webview.postMessage({ command: 'response-complete', text: `⏳ ${title}...`, role: 'system' });
-
-            const result = await this._executeToolDirect('run_command', { command: cmd });
-
-            // Determine if command succeeded or failed based on output
-            const isError = result.toLowerCase().includes('error') || result.toLowerCase().includes('failed');
-            const icon = isError ? '❌' : '✅';
-
-            webview.postMessage({
-                command: 'response-complete',
-                text: `### ${icon} ${title}\n\n\`\`\`\n${result}\n\`\`\``,
-                role: 'system'
-            });
-        } catch (error) {
-            webview.postMessage({
-                command: 'response-complete',
-                text: `❌ ${title} failed: ${error instanceof Error ? error.message : String(error)}`,
-                role: 'system'
-            });
-        }
-    }
-
-    private async addFileToContext(filePath: string, webview: vscode.Webview) {
-        try {
-            const workspaceFolders = vscode.workspace.workspaceFolders;
-            if (!workspaceFolders) {
-                webview.postMessage({ command: 'response-complete', text: '❌ No workspace open', role: 'system' });
-                return;
-            }
-
-            const rootPath = workspaceFolders[0].uri;
-            const fileUri = vscode.Uri.joinPath(rootPath, filePath);
-
-            try {
-                const content = await vscode.workspace.fs.readFile(fileUri);
-                const textContent = new TextDecoder().decode(content);
-                this._selectedFiles[filePath] = textContent;
-
-                const lines = textContent.split('\n').length;
-                webview.postMessage({
-                    command: 'response-complete',
-                    text: `✅ Added **${filePath}** to context (${lines} lines)`,
-                    role: 'system'
-                });
-            } catch (fsError) {
-                webview.postMessage({
-                    command: 'response-complete',
-                    text: `❌ File not found: ${filePath}`,
-                    role: 'system'
-                });
-            }
-        } catch (error) {
-            console.error(error);
-            webview.postMessage({ command: 'response-complete', text: '❌ Error adding file', role: 'system' });
         }
     }
 }

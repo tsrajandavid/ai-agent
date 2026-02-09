@@ -1,5 +1,5 @@
 export type TaskGroupStatus = 'not-started' | 'in-progress' | 'completed' | 'blocked';
-export type SubtaskStatus = 'not-started' | 'in-progress' | 'completed' | 'skipped';
+export type SubtaskStatus = 'not-started' | 'in-progress' | 'completed' | 'skipped' | 'failed';
 export type ProgressType = 'info' | 'success' | 'warning' | 'error';
 
 export interface Subtask {
@@ -23,6 +23,7 @@ export interface TaskGroup {
     title: string;
     description?: string; // Goal
     status: TaskGroupStatus;
+    isAutoRunning?: boolean;
     createdAt: number;
     updatedAt: number;
     subtasks: Subtask[];

@@ -5,10 +5,11 @@ import { LLMService } from './llm/llm-service';
 import { ToolManager } from './tools/tool-manager';
 import { ReadFileTool, ListDirTool, WriteFileTool, EditFileTool, SearchFilesTool, GrepTool } from './tools/file-tools';
 import { RunCommandTool } from './tools/terminal-tools';
-import { GitStatusTool, GitDiffTool, GitLogTool } from './tools/git-tools';
+import { GitStatusTool, GitDiffTool, GitLogTool, GitAddTool, GitCommitTool, GitPushTool } from './tools/git-tools';
 import { SnapshotService } from './services/snapshot-service';
 import { TaskGroupManager } from './agent/task-group-manager';
-import { SQLiteAdapter } from './agent/storage/sqlite-adapter';
+import { JSONAdapter } from './agent/storage/json-adapter';
+import { TaskPanel } from './webview/TaskPanel';
 
 let projectIndexer: ProjectIndexer | undefined;
 let toolManager: ToolManager;
@@ -40,6 +41,9 @@ function registerTools(rootPath: string) {
     toolManager.registerTool(new GitStatusTool(rootPath));
     toolManager.registerTool(new GitDiffTool(rootPath));
     toolManager.registerTool(new GitLogTool(rootPath));
+    toolManager.registerTool(new GitAddTool(rootPath));
+    toolManager.registerTool(new GitCommitTool(rootPath));
+    toolManager.registerTool(new GitPushTool(rootPath));
     console.log('[AI Agent] Registered tools:', toolManager.getRegisteredToolNames());
 }
 
@@ -93,6 +97,105 @@ export async function activate(context: vscode.ExtensionContext) {
     // Initialize Tool Manager first (tools will be registered when workspace is available)
     toolManager = new ToolManager();
 
+    // Initialize LLM Service
+    const llmService = new LLMService(context);
+
+    // Initialize Webview Provider immediately to ensure UI loads
+    const provider = new ChatPanelProvider(
+        context.extensionUri,
+        context,
+        llmService,
+        projectIndexer, // might be undefined initially if not created yet, but we will create it below
+        toolManager,
+        taskGroupManager,
+        ensureToolsRegistered
+    );
+
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider(ChatPanelProvider.viewType, provider)
+    );
+
+    // Register API Key commands EARLY and OUTSIDE workspace block
+    console.log('[AI Agent] Registering API Key commands...');
+    console.log('[AI Agent] llmService has setApiKey:', typeof (llmService as any).setApiKey);
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('ai-agent.setApiKey', async () => {
+            console.log('[AI Agent] Command ai-agent.setApiKey triggered');
+            const apiKey = await vscode.window.showInputBox({
+                prompt: 'Enter your OpenRouter API Key',
+                password: true,
+                ignoreFocusOut: true
+            });
+
+            if (apiKey) {
+                if (typeof llmService.setApiKey === 'function') {
+                    await llmService.setApiKey(apiKey);
+                    vscode.window.showInformationMessage('API Key saved successfully!');
+                } else {
+                    vscode.window.showErrorMessage('Critical Error: llmService.setApiKey is not a function at runtime!');
+                }
+            }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('ai-agent.setGoogleApiKey', async () => {
+            const apiKey = await vscode.window.showInputBox({
+                prompt: 'Enter your Google Gemini API Key (starts with AIza...)',
+                password: true,
+                ignoreFocusOut: true
+            });
+
+            if (apiKey) {
+                if (typeof llmService.setGoogleApiKey === 'function') {
+                    await llmService.setGoogleApiKey(apiKey);
+                    vscode.window.showInformationMessage('Google API Key saved successfully!');
+                } else {
+                    vscode.window.showErrorMessage('Critical Error: llmService.setGoogleApiKey is not a function at runtime!');
+                }
+            }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('ai-agent.setGroqApiKey', async () => {
+            const apiKey = await vscode.window.showInputBox({
+                prompt: 'Enter your Groq API Key',
+                password: true,
+                ignoreFocusOut: true
+            });
+
+            if (apiKey) {
+                if (typeof llmService.setGroqApiKey === 'function') {
+                    await llmService.setGroqApiKey(apiKey);
+                    vscode.window.showInformationMessage('Groq API Key saved successfully!');
+                } else {
+                    vscode.window.showErrorMessage('Critical Error: llmService.setGroqApiKey is not a function at runtime!');
+                }
+            }
+        })
+    );
+
+    const disposable = vscode.commands.registerCommand(
+        'ai-agent.openChat',
+        () => {
+            vscode.commands.executeCommand('workbench.view.extension.ai-agent-sidebar');
+        }
+    );
+    context.subscriptions.push(disposable);
+
+    // Register Task Dashboard Command early
+    context.subscriptions.push(
+        vscode.commands.registerCommand('ai-agent.openTaskDashboard', () => {
+            if (taskGroupManager) {
+                TaskPanel.render(context.extensionUri, taskGroupManager);
+            } else {
+                vscode.window.showErrorMessage('Task Manager not initialized yet. Please wait or open a workspace.');
+            }
+        })
+    );
+
     // Get workspace folder
     const workspaceFolders = vscode.workspace.workspaceFolders;
     let rootPath = "";
@@ -106,14 +209,27 @@ export async function activate(context: vscode.ExtensionContext) {
         // Register tools immediately
         registerTools(rootPath);
 
-        // Initialize project indexer
-        projectIndexer = new ProjectIndexer(rootPath);
-        await projectIndexer.initialize();
+        try {
+            // Initialize project indexer
+            projectIndexer = new ProjectIndexer(rootPath);
+            await projectIndexer.initialize();
 
-        console.log('[AI Agent] Indexing project...');
-        const projectState = await projectIndexer.scanFiles();
-        console.log(`[AI Agent] Indexed ${projectState.files.length} files.`);
-        console.log(`[AI Agent] Detected Frameworks: ${projectState.frameworks.join(', ')}`);
+            // Initialize Task Group Manager
+            const storage = new JSONAdapter(rootPath);
+            taskGroupManager = new TaskGroupManager(storage, llmService, rootPath);
+
+
+
+            console.log('[AI Agent] Indexing project...');
+            const projectState = await projectIndexer.scanFiles();
+            console.log(`[AI Agent] Indexed ${projectState.files.length} files.`);
+            console.log(`[AI Agent] Detected Frameworks: ${projectState.frameworks.join(', ')}`);
+        } catch (error) {
+            console.error('[AI Agent] Failed to initialize services:', error);
+            vscode.window.showErrorMessage('AI Agent: Failed to initialize some services. Check output for details.');
+        }
+
+
     } else {
         console.warn('[AI Agent] No workspace folder open!');
         vscode.window.showWarningMessage(
@@ -126,126 +242,22 @@ export async function activate(context: vscode.ExtensionContext) {
         });
     }
 
-    // Listen for workspace folder changes (user opens a folder later)
-    context.subscriptions.push(
-        vscode.workspace.onDidChangeWorkspaceFolders((event) => {
-            console.log('[AI Agent] Workspace folders changed:', event);
-            if (event.added.length > 0 && toolManager.getRegisteredToolNames().length === 0) {
-                const newRootPath = event.added[0].uri.fsPath;
-                registerTools(newRootPath);
-                vscode.window.showInformationMessage('AI Agent: Tools are now available!');
-            }
-        })
-    );
+    // Re-register provider with initialized services if needed?
+    // The provider holds references. Since `projectIndexer` and `taskGroupManager` are passed by value (reference to object),
+    // but here we are assigning to the *variable* `projectIndexer`.
+    // The provider received `undefined` because variables were undefined when passed.
+    // We need to update the provider's references!
 
-    // Initialize LLM Service
-    const llmService = new LLMService(context);
-
-    // Initialize Snapshot Service (Optional, needs rootPath)
-    if (rootPath) {
-        const snapshotService = new SnapshotService(rootPath);
-        context.subscriptions.push(
-            vscode.commands.registerCommand('ai-agent.createSnapshot', async () => {
-                const name = await vscode.window.showInputBox({ prompt: 'Snapshot Name' });
-                if (name) {
-                    try {
-                        const result = await snapshotService.createSnapshot(name);
-                        vscode.window.showInformationMessage(result);
-                    } catch (err: any) {
-                        vscode.window.showErrorMessage(err.message);
-                    }
-                }
-            })
-        );
+    // Quick fix: Add setServices method to ChatPanelProvider
+    if (projectIndexer) {
+        // We need to cast to any or add method to interface
+        (provider as any).setProjectIndexer?.(projectIndexer);
+    }
+    if (taskGroupManager) {
+        (provider as any).setTaskGroupManager?.(taskGroupManager);
     }
 
-    // Register command to manually refresh tools (useful for debugging)
-    context.subscriptions.push(
-        vscode.commands.registerCommand('ai-agent.refreshTools', () => {
-            const currentRoot = getWorkspaceRoot();
-            if (currentRoot) {
-                // Clear existing tools first
-                toolManager = new ToolManager();
-                registerTools(currentRoot);
-                vscode.window.showInformationMessage(`AI Agent: Tools registered for ${currentRoot}`);
-            } else {
-                vscode.window.showWarningMessage('AI Agent: No workspace folder. Please open a folder first.');
-            }
-        })
-    );
-
-    // Register API Key command
-    context.subscriptions.push(
-        vscode.commands.registerCommand('ai-agent.setApiKey', async () => {
-            const apiKey = await vscode.window.showInputBox({
-                prompt: 'Enter your OpenRouter API Key',
-                password: true,
-                ignoreFocusOut: true
-            });
-
-            if (apiKey) {
-                await llmService.setApiKey(apiKey);
-                vscode.window.showInformationMessage('API Key saved successfully!');
-            }
-        })
-    );
-
-    // Register Webview Provider (ALWAYS)
-    const provider = new ChatPanelProvider(
-        context.extensionUri,
-        context,
-        llmService,
-        projectIndexer,
-        toolManager,
-        taskGroupManager,
-        ensureToolsRegistered  // Pass the function to ensure tools are registered
-    );
-    context.subscriptions.push(
-        vscode.window.registerWebviewViewProvider(ChatPanelProvider.viewType, provider)
-    );
-
-    const disposable = vscode.commands.registerCommand(
-        'ai-agent.openChat',
-        () => {
-            vscode.commands.executeCommand('workbench.view.extension.ai-agent-sidebar');
-        }
-    );
-
-
-    context.subscriptions.push(disposable);
-
-    // Register Create Task Group Command
-    context.subscriptions.push(
-        vscode.commands.registerCommand('ai-agent.createTaskGroup', async () => {
-            if (!taskGroupManager) {
-                vscode.window.showErrorMessage('Task Group Manager not initialized');
-                return;
-            }
-
-            const title = await vscode.window.showInputBox({
-                title: "Task Group Title",
-                prompt: "e.g., Refactor Auth System"
-            });
-            if (!title) return;
-
-            const goal = await vscode.window.showInputBox({
-                title: "Task Group Goal",
-                prompt: "Describe what needs to be achieved",
-                value: title
-            });
-            if (!goal) return;
-
-            try {
-                const group = await taskGroupManager.create(title, goal);
-                provider.updateTaskGroup(group);
-                vscode.window.showInformationMessage(`Task Group "${title}" created!`);
-                // Open the sidebar
-                vscode.commands.executeCommand('workbench.view.extension.ai-agent-sidebar');
-            } catch (e: any) {
-                vscode.window.showErrorMessage(`Failed to create task group: ${e.message}`);
-            }
-        })
-    );
+    // ... rest of event listeners ...
 }
 
 export function deactivate() {

@@ -1,0 +1,121 @@
+.task-document-container {
+    padding: 40px;
+    max-width: 800px;
+    margin: 0 auto;
+    font-family: var(--vscode-font-family);
+    color: var(--vscode-editor-foreground);
+    background-color: var(--vscode-editor-background);
+    height: 100vh;
+    overflow-y: auto;
+    box-sizing: border-box;
+}
+
+.document-header {
+    margin-bottom: 40px;
+    border-bottom: 1px solid var(--vscode-widget-border);
+    padding-bottom: 20px;
+}
+
+.title-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 8px;
+}
+
+.document-header h1 {
+    font-size: 2.5em;
+    font-weight: 300;
+    margin: 0;
+    line-height: 1.2;
+}
+
+.status-badge {
+    font-size: 0.8em;
+    padding: 2px 8px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    font-weight: 600;
+    background-color: var(--vscode-badge-background);
+    color: var(--vscode-badge-foreground);
+}
+
+.progress-text {
+    font-size: 0.9em;
+    color: var(--vscode-descriptionForeground);
+}
+
+.description {
+    margin-top: 16px;
+    font-size: 1.1em;
+    line-height: 1.6;
+    color: var(--vscode-foreground);
+    opacity: 0.9;
+}
+
+.task-section h2 {
+    font-size: 1.5em;
+    font-weight: 500;
+    margin-bottom: 20px;
+    color: var(--vscode-foreground);
+}
+
+.task-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.task-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 8px 0;
+    transition: opacity 0.2s;
+}
+
+.task-row.completed .task-title {
+    text-decoration: line-through;
+    opacity: 0.7;
+}
+
+.task-row.completed .task-desc {
+    opacity: 0.5;
+}
+
+.checkbox-wrapper {
+    padding-top: 2px;
+}
+
+.task-content {
+    flex: 1;
+}
+
+.task-title {
+    font-size: 1.1em;
+    font-weight: 400;
+    display: block;
+    margin-bottom: 4px;
+}
+
+.task-desc {
+    font-size: 0.9em;
+    color: var(--vscode-descriptionForeground);
+    margin: 0 0 8px 0;
+    line-height: 1.4;
+}
+
+.task-files {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.file-tag {
+    font-family: 'Consolas', monospace;
+    font-size: 0.85em;
+    background-color: var(--vscode-textCodeBlock-background);
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: var(--vscode-textPreformat-foreground);
+}

@@ -8,6 +8,7 @@ export interface FileMetadata {
     path: string;
     size: number;
     language: string;
+    imports?: string[];
 }
 
 export interface ProjectState {
@@ -83,10 +84,25 @@ export class ProjectIndexer {
                 continue;
             }
 
+            const ext = path.extname(entry.path).toLowerCase();
+            const language = ext.replace('.', '');
+            let imports: string[] = [];
+
+            // Extract imports for JS/TS files
+            if (['.ts', '.tsx', '.js', '.jsx'].includes(ext) && entry.stats && entry.stats.size < 50 * 1024) {
+                try {
+                    const content = fs.readFileSync(path.join(this.workspaceRoot, entry.path), 'utf-8');
+                    imports = this.extractImports(content);
+                } catch (e) {
+                    // Ignore read errors
+                }
+            }
+
             files.push({
                 path: entry.path,
                 size: entry.stats?.size || 0,
-                language: path.extname(entry.path).replace('.', '')
+                language,
+                imports
             });
 
             // Parse package.json for dependencies and frameworks
@@ -105,6 +121,20 @@ export class ProjectIndexer {
         };
 
         return this.cache;
+    }
+
+    private extractImports(content: string): string[] {
+        const imports: string[] = [];
+        // Match import ... from '...' or require('...')
+        const importRegex = /import\s+(?:[\s\S]*?from\s+)?['"]([^'"]+)['"]|require\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+        let match;
+        while ((match = importRegex.exec(content)) !== null) {
+            const importPath = match[1] || match[2];
+            if (importPath && (importPath.startsWith('./') || importPath.startsWith('../'))) {
+                imports.push(importPath);
+            }
+        }
+        return imports;
     }
 
     private parsePackageJson(filePath: string): { dependencies: Record<string, string>, frameworks: string[] } {

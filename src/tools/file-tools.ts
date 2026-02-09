@@ -47,7 +47,7 @@ export class ReadFileTool implements Tool {
 }
 
 export class ListDirTool implements Tool {
-    name = 'list_dir';
+    name = 'list_directory';
     description = 'List files and directories in a path. Use "." for the root directory.';
     parameters = {
         type: 'object',
@@ -318,7 +318,7 @@ function matchGlob(filename: string, pattern: string): boolean {
 }
 
 export class GrepTool implements Tool {
-    name = 'grep';
+    name = 'search_code';
     description = 'Search for text content within files. Returns matching lines with file paths.';
     parameters = {
         type: 'object',
