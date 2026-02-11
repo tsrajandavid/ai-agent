@@ -8,13 +8,14 @@ interface DropdownProps {
   selectedId: string;
   onSelect: (item: Mode) => void;
   title?: string;
+  position?: 'top' | 'bottom';
 }
 
-export const Dropdown = ({ label, items, selectedId, onSelect, title }: DropdownProps) => {
+export const Dropdown = ({ label, items, selectedId, onSelect, title, position = 'top' }: DropdownProps) => {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <div className="custom-dropdown">
+    <div className={`custom-dropdown ${isOpen ? 'is-open' : ''}`}>
       <button
         className={`dropdown-trigger ${isOpen ? 'active' : ''}`}
         onClick={() => setIsOpen(!isOpen)}
@@ -26,7 +27,7 @@ export const Dropdown = ({ label, items, selectedId, onSelect, title }: Dropdown
       {isOpen && (
         <>
           <div className="dropdown-backdrop" onClick={() => setIsOpen(false)} />
-          <div className="dropdown-menu">
+          <div className={`dropdown-menu ${position}`}>
             {title && <div className="dropdown-header">{title}</div>}
             {items.map((item) => (
               <div

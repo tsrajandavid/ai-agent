@@ -2,7 +2,7 @@
 export { SendIcon, PlusIcon, CopyIcon, CheckIcon, ChevronIcon, StopIcon } from './Icons';
 export { CodeBlock } from './CodeBlock';
 export { renderMarkdown } from './MarkdownRenderer';
-export { Message, ToolMessage, ThinkingIndicator } from './Message';
+export { Message, ThinkingIndicator } from './Message';
 export { ApprovalRequest } from './ApprovalRequest';
 export { Dropdown } from './Dropdown';
 export { ContextMenu } from './ContextMenu';

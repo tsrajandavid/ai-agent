@@ -20,8 +20,12 @@ export class TaskTools {
                     required: ['goal']
                 },
                 execute: async (args: { goal: string }) => {
-                    const title = args.goal.length > 40 ? args.goal.substring(0, 37) + '...' : args.goal;
-                    const group = await this.taskGroupManager.create(title, args.goal);
+                    const goal = args?.goal;
+                    if (!goal || typeof goal !== 'string') {
+                        return 'Error: "goal" parameter is required and must be a string.';
+                    }
+                    const title = goal.length > 40 ? goal.substring(0, 37) + '...' : goal;
+                    const group = await this.taskGroupManager.create(title, goal);
 
                     // Open task.md automatically in preview mode
                     try {

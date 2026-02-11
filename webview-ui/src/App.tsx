@@ -11,17 +11,13 @@ import {
   ThinkingIndicator,
   ApprovalRequest,
   Dropdown,
-  ContextMenu,
   FileAutocomplete,
   SlashCommandPicker,
   ChatHistory
 } from './components';
-import { TaskBoard } from './components/TaskBoard';
 import { TaskDocumentView } from './components/TaskDocumentView';
 import type { TaskGroup } from './types/task-group';
-import { formatTimeAgo } from './utils/dateUtils';
 import './App.css';
-import './components/TaskBoard.css';
 
 const SUGGESTIONS = [
   "Explain this code",
@@ -30,6 +26,9 @@ const SUGGESTIONS = [
   "Refactor for readability"
 ];
 
+// Messages to hide from chat display
+const HIDDEN_COMMANDS = new Set(['tool-call', 'tool-result']);
+
 function App() {
   const { postMessage, messages, setMessages, streamingContent, setStreamingContent } = useVSCode();
   const [inputValue, setInputValue] = useState("");
@@ -37,30 +36,23 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [showContext, setShowContext] = useState(false);
 
-  // Model State
   const [currentModel, setCurrentModel] = useState(MODELS[0]);
 
-  // File Autocomplete State
   const [files, setFiles] = useState<string[]>([]);
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [fileFilter, setFileFilter] = useState("");
 
-  // Slash Command Picker State
   const [showSlashPicker, setShowSlashPicker] = useState(false);
   const [slashFilter, setSlashFilter] = useState("");
 
-  // Approval State
   const [pendingApproval, setPendingApproval] = useState<ApprovalData | null>(null);
 
-  // Multi-Chat State
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeChatId, setActiveChatId] = useState<string>("");
-  const [showHistory, setShowHistory] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(false);
 
-  // Task Group State
   const [taskGroups, setTaskGroups] = useState<TaskGroup[]>([]);
   const [activeGroupId, setActiveGroupId] = useState<string>("");
-  const [currentView, setCurrentView] = useState<'chat' | 'tasks'>('chat');
   const [appRoute, setAppRoute] = useState<'sidebar-chat' | 'tasks-document'>(
     (window as any).initialRoute || 'sidebar-chat'
   );
@@ -69,13 +61,15 @@ function App() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const resizeTimerRef = useRef<number>(0);
 
+  // Filter: hide tool-call and tool-result from chat
+  const visibleMessages = useMemo(() =>
+    messages.filter(msg => !HIDDEN_COMMANDS.has(msg.command || '')),
+    [messages]
+  );
 
-
-  // Handle response completion and other commands
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       const message = event.data;
-      console.log('[AI Agent UI] Received message:', message.command, message);
 
       if (message.command === 'response-complete' || message.command === 'error' || message.command === 'generation-stopped') {
         setIsLoading(false);
@@ -90,14 +84,11 @@ function App() {
         setFiles(message.files || []);
       }
       if (message.command === 'set-route') {
-        console.log('[AI Agent UI] Set route:', message.route);
         setAppRoute(message.route);
       }
       if (message.command === 'update-task-list') {
         setTaskGroups(message.taskGroups || []);
-        if (message.activeGroupId) {
-          setActiveGroupId(message.activeGroupId);
-        }
+        if (message.activeGroupId) setActiveGroupId(message.activeGroupId);
       }
       if (message.command === 'approval-request') {
         setPendingApproval({
@@ -116,9 +107,7 @@ function App() {
       }
       if (message.command === 'update-conversation-list') {
         setConversations(message.conversations || []);
-        if (message.activeId) {
-          setActiveChatId(message.activeId);
-        }
+        if (message.activeId) setActiveChatId(message.activeId);
       }
       if (message.command === 'update-task-group') {
         setTaskGroups(prev => {
@@ -134,8 +123,6 @@ function App() {
     };
     window.addEventListener('message', handleMessage);
 
-    // Signal ready AFTER listener is attached
-    console.log('[AI Agent UI] Initializing...');
     postMessage("webview-ready", "");
     postMessage("setModel", currentModel.id);
     postMessage("refresh-files", "");
@@ -143,12 +130,19 @@ function App() {
     return () => window.removeEventListener('message', handleMessage);
   }, []);
 
-  // Handle Input Change for Autocomplete
+  // Sync mode and model with backend when they change
+  useEffect(() => {
+    postMessage("setMode", mode.id);
+  }, [mode.id]);
+
+  useEffect(() => {
+    postMessage("setModel", currentModel.id);
+  }, [currentModel.id]);
+
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     setInputValue(val);
 
-    // Check for @mention (file picker)
     const atMatch = val.match(/@([\w/.-]*)$/);
     if (atMatch) {
       setShowFilePicker(true);
@@ -158,7 +152,6 @@ function App() {
       setShowFilePicker(false);
     }
 
-    // Check for / command (slash picker) - only at start of input
     if (val.startsWith('/')) {
       setShowSlashPicker(true);
       setSlashFilter(val);
@@ -179,25 +172,20 @@ function App() {
     const match = inputValue.match(/@([\w/.-]*)$/);
     if (match) {
       const prefix = inputValue.substring(0, match.index);
-      const newValue = prefix + `/add ${file} `;
-      setInputValue(newValue);
+      setInputValue(prefix + `/add ${file} `);
       setShowFilePicker(false);
       textareaRef.current?.focus();
     }
   }, [inputValue]);
 
-  // Auto-scroll to bottom using RAF for smoother scrolling
   useEffect(() => {
     requestAnimationFrame(() => {
       chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     });
   }, [messages, streamingContent, isLoading]);
 
-  // Debounced auto-resize textarea
   useEffect(() => {
-    if (resizeTimerRef.current) {
-      cancelAnimationFrame(resizeTimerRef.current);
-    }
+    if (resizeTimerRef.current) cancelAnimationFrame(resizeTimerRef.current);
     resizeTimerRef.current = requestAnimationFrame(() => {
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
@@ -209,21 +197,19 @@ function App() {
   const handleSend = () => {
     if (!inputValue.trim()) return;
 
-    // Optimistic update
-    setMessages(prev => [...prev, { role: "user", text: inputValue, timestamp: Date.now() }]);
+    // Add user message locally
+    setMessages(prev => [...prev, { command: 'newMessage', role: "user", text: inputValue, timestamp: Date.now() }]);
     setInputValue("");
     setIsLoading(true);
     setStreamingContent("");
 
-    postMessage("chat", { text: inputValue, mode: mode.id, model: currentModel.id });
+    // Send to backend — "hello" matches ChatPanelProvider switch case
+    postMessage("hello", inputValue);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
-      if (showFilePicker || showSlashPicker) {
-        // Let the picker handle Enter
-        return;
-      }
+      if (showFilePicker || showSlashPicker) return;
       e.preventDefault();
       handleSend();
     }
@@ -239,15 +225,15 @@ function App() {
     textareaRef.current?.focus();
   };
 
-  const handleApprove = (feedback?: string) => {
+  const handleApprove = () => {
     if (!pendingApproval) return;
-    postMessage('approval-response', { approved: true, feedback: feedback || "" });
+    postMessage('approval-response', JSON.stringify({ approved: true }));
     setPendingApproval(null);
   };
 
-  const handleReject = (feedback?: string) => {
+  const handleReject = () => {
     if (!pendingApproval) return;
-    postMessage('approval-response', { approved: false, feedback: feedback || "" });
+    postMessage('approval-response', JSON.stringify({ approved: false }));
     setPendingApproval(null);
   };
 
@@ -257,29 +243,10 @@ function App() {
     setStreamingContent("");
   };
 
-  const handleHistoryParams = {
-    conversations,
-    activeChatId,
-    onSelectChat: (id: string) => {
-      setActiveChatId(id);
-      postMessage('load-conversation', { id });
-      setShowHistory(false);
-    },
-    onDeleteChat: (id: string) => {
-      postMessage('delete-conversation', { id });
-    },
-    onNewChat: () => {
-      postMessage('new-chat', "");
-      setShowHistory(false);
-    }
-  };
-
   // --- RENDERING ---
 
-  // Render Document View if route is 'tasks-document'
   if (appRoute === 'tasks-document') {
     const activeGroup = taskGroups.find(g => g.id === activeGroupId) || taskGroups[0];
-
     if (!activeGroup) {
       return (
         <div className="task-document-container">
@@ -290,13 +257,11 @@ function App() {
         </div>
       );
     }
-
     return (
       <TaskDocumentView
         taskGroup={activeGroup}
         onToggleSubtask={(groupId, subtaskId, completed) => {
-          postMessage('toggle-subtask', { groupId, subtaskId, completed });
-          // Optimistic update
+          postMessage('toggle-subtask', JSON.stringify({ groupId, subtaskId, completed }));
           setTaskGroups(prev => prev.map(g => {
             if (g.id === groupId) {
               return {
@@ -315,200 +280,173 @@ function App() {
 
   return (
     <div className="app-container">
-      {/* Sidebar Backdrop */}
-      {showHistory && <div className="sidebar-backdrop" onClick={() => setShowHistory(false)} />}
+      {/* Sidebar toggle */}
+      <button
+        className="sidebar-toggle"
+        onClick={() => setShowSidebar(!showSidebar)}
+        title={showSidebar ? 'Hide history' : 'Show history'}
+      >
+        {showSidebar ? '\u2715' : '\u2630'}
+      </button>
 
-      {/* Chat History Sidebar */}
-      <ChatHistory
-        isOpen={showHistory}
-        onClose={() => setShowHistory(false)}
-        {...handleHistoryParams}
-      />
+      {/* History sidebar */}
+      {showSidebar && (
+        <>
+          <div className="sidebar-backdrop" onClick={() => setShowSidebar(false)} />
+          <div className="sidebar-panel">
+            <ChatHistory
+              conversations={conversations}
+              activeId={activeChatId}
+              onSelect={(id: string) => {
+                setActiveChatId(id);
+                postMessage('load-chat', JSON.stringify({ chatId: id }));
+                setShowSidebar(false);
+              }}
+              onDelete={(id: string, e: React.MouseEvent) => {
+                e.stopPropagation();
+                postMessage('delete-chat', JSON.stringify({ chatId: id }));
+              }}
+              onNewChat={() => {
+                postMessage('new-chat', "");
+                setShowSidebar(false);
+              }}
+            />
+          </div>
+        </>
+      )}
 
+      {/* Header */}
       <div className="header">
         <div className="header-left">
-          <button className="icon-button" onClick={() => setShowHistory(!showHistory)} title="History">
-            <span className="codicon codicon-history"></span>
-          </button>
-          <div className="view-switcher">
-            <button
-              className={`view-tab ${currentView === 'chat' ? 'active' : ''}`}
-              onClick={() => setCurrentView('chat')}
-            >
-              Chat
-            </button>
-            <button
-              className={`view-tab ${currentView === 'tasks' ? 'active' : ''}`}
-              onClick={() => setCurrentView('tasks')}
-            >
-              Tasks
-            </button>
-          </div>
+          <span className="header-title">Akku AI</span>
         </div>
         <div className="header-right">
           <Dropdown
-            options={MODES}
-            selected={mode}
+            label={mode.label}
+            items={MODES}
+            selectedId={mode.id}
             onSelect={setMode}
-            className="mode-selector"
+            position="bottom"
           />
           <Dropdown
-            options={MODELS}
-            selected={currentModel}
-            onSelect={setCurrentModel}
-            className="model-dropdown"
-            align="right"
+            label={currentModel.label}
+            items={MODELS as any}
+            selectedId={currentModel.id}
+            onSelect={(item: any) => setCurrentModel(item)}
+            position="bottom"
           />
         </div>
       </div>
 
+      {/* Main chat */}
       <div className="main-content">
-        {currentView === 'tasks' ? (
-          <TaskBoard
-            taskGroups={taskGroups}
-            activeGroupId={activeGroupId}
-            onSelectGroup={setActiveGroupId}
-            onToggleSubtask={(groupId, subtaskId, completed) => {
-              postMessage('toggle-subtask', { groupId, subtaskId, completed });
-              // Optimistic update to UI
-              setTaskGroups(prev => prev.map(g => {
-                if (g.id === groupId) {
-                  return {
-                    ...g,
-                    subtasks: g.subtasks.map(t =>
-                      t.id === subtaskId ? { ...t, status: completed ? 'completed' : 'not-started' } : t
-                    )
-                  };
-                }
-                return g;
-              }));
-            }}
-            onCreateGroup={() => {
-              setCurrentView('chat');
-              setInputValue('/plan ');
-              textareaRef.current?.focus();
-            }}
-          />
-        ) : (
-          <div className={`chat-container ${messages.length === 0 ? 'empty' : ''}`}>
-            {messages.length === 0 ? (
-              <div className="welcome-message">
-                <h1>How can I help you today?</h1>
-                <p className="subtitle">I can explain code, fix bugs, or generate tests.</p>
-
-                <div className="suggestions">
-                  {SUGGESTIONS.map((s, i) => (
-                    <button key={i} className="suggestion-chip" onClick={() => handleSuggestion(s)}>
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="messages-list">
-                {messages.map((msg, index) => (
-                  <Message
-                    key={index}
-                    message={msg}
-                    isLast={index === messages.length - 1}
-                  />
+        <div className={`chat-container ${visibleMessages.length === 0 ? 'empty' : ''}`}>
+          {visibleMessages.length === 0 ? (
+            <div className="welcome-message">
+              <h1>How can I help you today?</h1>
+              <p className="subtitle">I can explain code, fix bugs, or generate tests.</p>
+              <div className="suggestions">
+                {SUGGESTIONS.map((s, i) => (
+                  <button key={i} className="suggestion-chip" onClick={() => handleSuggestion(s)}>
+                    {s}
+                  </button>
                 ))}
-
-                {streamingContent && (
-                  <div className="message assistant streaming">
-                    <div className="message-header">
-                      <span className="role-badge">AI Assistant</span>
-                    </div>
-                    <div className="message-content">
-                      {/* We render a thinking indicator if content is empty, or markdown otherwise */}
-                      {/* For now, just render text */}
-                      {/* The MarkdownRenderer handles this usually, but here we can just put a placeholder or use existing Message logic */}
-                      <Message message={{ role: 'assistant', text: streamingContent }} isLast={true} />
-                    </div>
-                  </div>
-                )}
-
-                {isLoading && !streamingContent && (
-                  <ThinkingIndicator />
-                )}
-
-                <div ref={chatEndRef} />
               </div>
-            )}
-          </div>
-        )}
+            </div>
+          ) : (
+            <div className="messages-list">
+              {visibleMessages.map((msg, index) => (
+                <Message
+                  key={index}
+                  role={msg.role}
+                  text={msg.text || ''}
+                  command={msg.command}
+                  tool={msg.tool}
+                  result={msg.result}
+                />
+              ))}
+
+              {streamingContent && (
+                <Message role="system" text={streamingContent} />
+              )}
+
+              {isLoading && !streamingContent && (
+                <ThinkingIndicator />
+              )}
+
+              <div ref={chatEndRef} />
+            </div>
+          )}
+        </div>
       </div>
 
+      {/* Approval */}
       {pendingApproval && (
         <ApprovalRequest
-          data={pendingApproval}
+          tool={pendingApproval.tool}
+          filePath={pendingApproval.filePath}
+          oldContent={pendingApproval.oldContent}
+          newContent={pendingApproval.newContent}
+          oldString={pendingApproval.oldString}
+          newString={pendingApproval.newString}
           onApprove={handleApprove}
           onReject={handleReject}
         />
       )}
 
-      {currentView === 'chat' && (
-        <div className="input-area">
-          {/* Context Menu / Settings could go here */}
+      {/* Input */}
+      <div className="input-area">
+        <FileAutocomplete
+          files={files}
+          visible={showFilePicker}
+          filter={fileFilter}
+          onSelect={handleFileSelect}
+        />
+        <SlashCommandPicker
+          visible={showSlashPicker}
+          filter={slashFilter}
+          onSelect={handleSlashSelect}
+        />
 
-          {/* Pickers */}
-          {showFilePicker && (
-            <FileAutocomplete
-              files={files}
-              filter={fileFilter}
-              onSelect={handleFileSelect}
-              onClose={() => setShowFilePicker(false)}
-            />
-          )}
-
-          {showSlashPicker && (
-            <SlashCommandPicker
-              filter={slashFilter}
-              onSelect={handleSlashSelect}
-              onClose={() => setShowSlashPicker(false)}
-            />
-          )}
-
-          <div className="input-wrapper">
-            <textarea
-              ref={textareaRef}
-              className="chat-input"
-              placeholder={showFilePicker ? "Select a file..." : "Ask a question... (Type / for commands, @ to add files)"}
-              value={inputValue}
-              onChange={handleInputChange}
-              onKeyDown={handleKeyDown}
-              rows={1}
-              disabled={!!pendingApproval}
-            />
-            <div className="input-controls">
-              <button
-                className="icon-button"
-                onClick={() => setShowContext(!showContext)}
-                title="Add Context"
-              >
-                <PlusIcon />
+        <div className="input-wrapper">
+          <textarea
+            ref={textareaRef}
+            className="chat-input"
+            placeholder="Ask a question... (/ for commands, @ for files)"
+            value={inputValue}
+            onChange={handleInputChange}
+            onKeyDown={handleKeyDown}
+            rows={1}
+            disabled={!!pendingApproval}
+          />
+          <div className="input-controls">
+            <button
+              className="icon-button"
+              onClick={() => setShowContext(!showContext)}
+              title="Add Context"
+            >
+              <PlusIcon />
+            </button>
+            {isLoading ? (
+              <button className="send-button stop" onClick={handleStop} title="Stop">
+                <StopIcon />
               </button>
-              {isLoading ? (
-                <button className="send-button stop" onClick={handleStop} title="Stop">
-                  <StopIcon />
-                </button>
-              ) : (
-                <button
-                  className="send-button"
-                  onClick={handleSend}
-                  disabled={!inputValue.trim() || !!pendingApproval}
-                >
-                  <SendIcon />
-                </button>
-              )}
-            </div>
-          </div>
-          <div className="footer-info">
-            <span>{currentModel.name}</span>
-            {files.length > 0 && <span className="file-count">{files.length} context files</span>}
+            ) : (
+              <button
+                className="send-button"
+                onClick={handleSend}
+                disabled={!inputValue.trim() || !!pendingApproval}
+              >
+                <SendIcon />
+              </button>
+            )}
           </div>
         </div>
-      )}
+        <div className="footer-info">
+          <span>{currentModel.label}</span>
+          {files.length > 0 && <span className="file-count">{files.length} files</span>}
+        </div>
+      </div>
     </div>
   );
 }

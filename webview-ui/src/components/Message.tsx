@@ -1,12 +1,12 @@
 import React, { useState, useCallback } from 'react';
-import { ChevronIcon, CopyIcon, CheckIcon } from './Icons';
+import { CopyIcon, CheckIcon } from './Icons';
 import { renderMarkdown } from './MarkdownRenderer';
 
 // Thinking Indicator Component
 export const ThinkingIndicator = () => (
   <div className="message system">
     <div className="message-wrapper">
-      <div className="message-avatar">AI</div>
+      <div className="message-avatar system-avatar">AI</div>
       <div className="message-body">
         <div className="thinking-indicator">
           <div className="thinking-dots">
@@ -21,38 +21,6 @@ export const ThinkingIndicator = () => (
   </div>
 );
 
-// Tool Message Component
-interface ToolMessageProps {
-  tool: string;
-  result?: string;
-  isCall?: boolean;
-}
-
-export const ToolMessage = React.memo(({ tool, result, isCall }: ToolMessageProps) => {
-  const [expanded, setExpanded] = useState(!isCall);
-
-  return (
-    <div className="message tool">
-      <div className="message-wrapper">
-        <div className="message-avatar tool-avatar">🔧</div>
-        <div className="message-body">
-          <div className="tool-header" onClick={() => setExpanded(!expanded)}>
-            <span className="tool-name">
-              {isCall ? `Using ${tool}...` : `${tool} result`}
-            </span>
-            <ChevronIcon isOpen={expanded} />
-          </div>
-          {expanded && result && (
-            <div className="tool-content">
-              <pre><code>{result}</code></pre>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-});
-
 // Main Message Component
 interface MessageProps {
   role: 'user' | 'system' | 'tool';
@@ -62,7 +30,7 @@ interface MessageProps {
   result?: string;
 }
 
-export const Message = React.memo(({ role, text, command, tool, result }: MessageProps) => {
+export const Message = React.memo(({ role, text, command }: MessageProps) => {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(async () => {
@@ -75,23 +43,24 @@ export const Message = React.memo(({ role, text, command, tool, result }: Messag
     }
   }, [text]);
 
-  // Handle tool messages
+  // Hide tool messages entirely — they are filtered in App.tsx via HIDDEN_COMMANDS
+  // but guard here as well for safety
   if (role === 'tool' || command === 'tool-call' || command === 'tool-result') {
-    return (
-      <ToolMessage
-        tool={tool || 'unknown'}
-        result={result || text}
-        isCall={command === 'tool-call'}
-      />
-    );
+    return null;
   }
 
   const isUser = role === 'user';
 
+  // Strip <think> blocks from AI responses
+  const cleanText = isUser ? text : text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+
+  // Skip empty AI messages (e.g. tool-only turns with no visible content)
+  if (!isUser && !cleanText) return null;
+
   return (
     <div className={`message ${role}`}>
       <div className="message-wrapper">
-        <div className="message-avatar">
+        <div className={`message-avatar ${isUser ? 'user-avatar' : 'system-avatar'}`}>
           {isUser ? 'U' : 'AI'}
         </div>
         <div className="message-body">
@@ -99,7 +68,7 @@ export const Message = React.memo(({ role, text, command, tool, result }: Messag
             <span className="message-role">{isUser ? 'You' : 'Assistant'}</span>
           </div>
           <div className="message-content">
-            {renderMarkdown(text.replace(/<think>[\s\S]*?<\/think>/g, ''))}
+            {renderMarkdown(cleanText)}
           </div>
         </div>
       </div>

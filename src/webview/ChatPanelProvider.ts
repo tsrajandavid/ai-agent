@@ -134,6 +134,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             this._llmService,
             (prompt) => this._executeAutoStep(prompt)
         );
+        this._wireActionEngineEvents();
         this.registerCommands();
         this._initializeAgentTools();
 
@@ -178,18 +179,34 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
                     return;
                 }
 
-                // Get active group
                 const groups = await this._taskGroupManager?.getAll() || [];
                 const activeGroup = groups.find(g => g.status === 'in-progress');
 
                 if (!activeGroup) {
-                    webview.postMessage({ command: 'response-complete', text: 'SOURCE: No active plan found to resume.', role: 'system' });
+                    webview.postMessage({ command: 'response-complete', text: 'No active plan found to resume.', role: 'system' });
                     return;
                 }
 
                 webview.postMessage({ command: 'response-complete', text: `🚀 **Resuming Plan:** ${activeGroup.title}\n\nExecuting next step...`, role: 'system' });
+                webview.postMessage({ command: 'auto-execution-status', running: true, groupId: activeGroup.id });
                 this.actionEngine.resume();
                 this.runAutoExecutionLoop(activeGroup.id);
+            }
+        });
+
+        // Register Stop Command
+        this.commandRegistry.register({
+            name: '/stop',
+            description: 'Stop auto-execution of the current plan',
+            execute: async (_args, webview) => {
+                if (!this.actionEngine) {
+                    webview.postMessage({ command: 'response-complete', text: '❌ No Action Engine running.', role: 'system' });
+                    return;
+                }
+
+                this.actionEngine.stop();
+                webview.postMessage({ command: 'response-complete', text: '⏹️ **Auto-execution stopped.** Type `/resume` or `continue` to pick up where you left off.', role: 'system' });
+                webview.postMessage({ command: 'auto-execution-status', running: false });
             }
         });
 
@@ -640,8 +657,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     private async handleUserMessage(text: string, webview: vscode.Webview) {
         console.log('[AI Agent] User message:', text);
 
-        // Echo user message to UI and save to history
-        webview.postMessage({ command: 'newMessage', text, role: 'user' });
+        // Save to persistent history (UI already added the message optimistically)
         this._addToHistory({ role: 'user', text });
 
         // Handle slash commands first
@@ -931,6 +947,23 @@ Do not explain. Just output the JSON.`
             command: "response-complete",
             text: "⚠️ Reached maximum tool iterations. Please continue with a new message.",
             role: 'system'
+        });
+    }
+
+    private _wireActionEngineEvents() {
+        if (!this.actionEngine) return;
+        this.actionEngine.on('step-start', (e: any) => {
+            this._view?.webview.postMessage({ command: 'auto-execution-status', running: true, step: e.title });
+        });
+        this.actionEngine.on('step-complete', (e: any) => {
+            this._view?.webview.postMessage({ command: 'newMessage', text: `✅ Completed: ${e.title}`, role: 'system' });
+        });
+        this.actionEngine.on('step-failed', (e: any) => {
+            this._view?.webview.postMessage({ command: 'newMessage', text: `❌ Failed: ${e.title}`, role: 'system' });
+            this._view?.webview.postMessage({ command: 'auto-execution-status', running: false });
+        });
+        this.actionEngine.on('status-changed', (e: any) => {
+            this._view?.webview.postMessage({ command: 'auto-execution-status', running: e.running });
         });
     }
 

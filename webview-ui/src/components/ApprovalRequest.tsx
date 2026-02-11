@@ -1,5 +1,64 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import type { ApprovalData } from '../types';
+
+interface DiffLine {
+  type: 'added' | 'removed' | 'unchanged';
+  content: string;
+  oldLineNum?: number;
+  newLineNum?: number;
+}
+
+function computeDiff(oldText: string, newText: string): DiffLine[] {
+  const oldLines = oldText.split('\n');
+  const newLines = newText.split('\n');
+  const result: DiffLine[] = [];
+
+  // Simple LCS-based diff
+  const m = oldLines.length;
+  const n = newLines.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = oldLines[i - 1] === newLines[j - 1]
+        ? dp[i - 1][j - 1] + 1
+        : Math.max(dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+
+  // Backtrack to build diff
+  const diffOps: Array<{ type: 'unchanged' | 'removed' | 'added'; line: string; oldIdx?: number; newIdx?: number }> = [];
+  let i = m, j = n;
+
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
+      diffOps.unshift({ type: 'unchanged', line: oldLines[i - 1], oldIdx: i, newIdx: j });
+      i--; j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      diffOps.unshift({ type: 'added', line: newLines[j - 1], newIdx: j });
+      j--;
+    } else {
+      diffOps.unshift({ type: 'removed', line: oldLines[i - 1], oldIdx: i });
+      i--;
+    }
+  }
+
+  let oldNum = 0, newNum = 0;
+  for (const op of diffOps) {
+    if (op.type === 'unchanged') {
+      oldNum++; newNum++;
+      result.push({ type: 'unchanged', content: op.line, oldLineNum: oldNum, newLineNum: newNum });
+    } else if (op.type === 'removed') {
+      oldNum++;
+      result.push({ type: 'removed', content: op.line, oldLineNum: oldNum });
+    } else {
+      newNum++;
+      result.push({ type: 'added', content: op.line, newLineNum: newNum });
+    }
+  }
+
+  return result;
+}
 
 interface ApprovalRequestProps extends ApprovalData {
   onApprove: () => void;
@@ -18,16 +77,37 @@ export const ApprovalRequest = ({
 }: ApprovalRequestProps) => {
   const [showDiff, setShowDiff] = useState(true);
 
-  // Determine what to show
   const isEdit = tool === 'edit_file';
   const isNewFile = !oldContent || oldContent.trim() === '';
 
-  // Get display content
-  const displayOld = isEdit ? oldString : oldContent;
-  const displayNew = isEdit ? newString : newContent;
+  const displayOld = isEdit ? (oldString || '') : (oldContent || '');
+  const displayNew = isEdit ? (newString || '') : (newContent || '');
 
-  // Get file extension for syntax hint
   const ext = filePath.split('.').pop() || '';
+
+  const diffLines: DiffLine[] = useMemo(() => {
+    if (!displayOld && displayNew) {
+      return displayNew.split('\n').map((line, i): DiffLine => ({
+        type: 'added',
+        content: line,
+        newLineNum: i + 1
+      }));
+    }
+    if (displayOld && !displayNew) {
+      return displayOld.split('\n').map((line, i): DiffLine => ({
+        type: 'removed',
+        content: line,
+        oldLineNum: i + 1
+      }));
+    }
+    if (displayOld && displayNew) {
+      return computeDiff(displayOld, displayNew);
+    }
+    return [];
+  }, [displayOld, displayNew]);
+
+  const additions = diffLines.filter(l => l.type === 'added').length;
+  const deletions = diffLines.filter(l => l.type === 'removed').length;
 
   return (
     <div className="message approval">
@@ -56,23 +136,38 @@ export const ApprovalRequest = ({
                 Preview
               </button>
               <span className="diff-file-type">{ext.toUpperCase()}</span>
+              {(additions > 0 || deletions > 0) && (
+                <span className="diff-stats">
+                  {additions > 0 && <span className="diff-stat-add">+{additions}</span>}
+                  {deletions > 0 && <span className="diff-stat-del">-{deletions}</span>}
+                </span>
+              )}
             </div>
 
             {showDiff ? (
               <div className="diff-view">
-                {displayOld && (
-                  <div className="diff-section removed">
-                    <div className="diff-label">- Removed</div>
-                    <pre><code>{displayOld}</code></pre>
-                  </div>
-                )}
-                {displayNew && (
-                  <div className="diff-section added">
-                    <div className="diff-label">+ Added</div>
-                    <pre><code>{displayNew}</code></pre>
-                  </div>
-                )}
-                {!displayOld && !displayNew && (
+                {diffLines.length > 0 ? (
+                  <table className="diff-table">
+                    <tbody>
+                      {diffLines.map((line, idx) => (
+                        <tr key={idx} className={`diff-line diff-line-${line.type}`}>
+                          <td className="diff-line-number diff-line-old">
+                            {line.oldLineNum ?? ''}
+                          </td>
+                          <td className="diff-line-number diff-line-new">
+                            {line.newLineNum ?? ''}
+                          </td>
+                          <td className="diff-line-prefix">
+                            {line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' '}
+                          </td>
+                          <td className="diff-line-content">
+                            <code>{line.content}</code>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
                   <div className="diff-empty">No changes to preview</div>
                 )}
               </div>

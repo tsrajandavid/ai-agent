@@ -1,6 +1,6 @@
 import React from 'react';
-import { TaskGroup, Subtask } from '../types/task-group';
-import { VSCodeCheckbox, VSCodeButton } from '@vscode/webview-ui-toolkit/react';
+import type { TaskGroup } from '../types/task-group';
+import { VSCodeCheckbox } from '@vscode/webview-ui-toolkit/react';
 import './TaskDocumentView.css';
 
 interface TaskDocumentViewProps {

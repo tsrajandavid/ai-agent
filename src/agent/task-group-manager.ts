@@ -184,19 +184,14 @@ Example:
         // Check if all subtasks are complete
         if (group.subtasks.every(s => s.status === 'completed' || s.status === 'skipped')) {
             group.status = 'completed';
-            if (group.subtasks.every(s => s.status === 'completed' || s.status === 'skipped')) {
-                group.status = 'completed';
-
-                // Add progress directly to avoid re-fetching stale data
-                group.progress.push({
-                    timestamp: Date.now(),
-                    message: 'All subtasks completed. Task group marked as completed.',
-                    type: 'success'
-                });
-            }
-
-            await this.save(group);
+            group.progress.push({
+                timestamp: Date.now(),
+                message: 'All subtasks completed. Task group marked as completed.',
+                type: 'success'
+            });
         }
+
+        await this.save(group);
     }
 
     async addProgress(groupId: string, update: Omit<ProgressUpdate, 'timestamp'>): Promise<void> {

@@ -1,7 +1,7 @@
 import React from 'react';
 import type { TaskGroup, Subtask } from '../types/task-group';
 import { SubtaskItem } from './task-group/SubtaskItem';
-import { VSCodePanelTab, VSCodePanelView, VSCodePanels, VSCodeButton, VSCodeTag } from '@vscode/webview-ui-toolkit/react';
+import { VSCodeButton, VSCodeTag } from '@vscode/webview-ui-toolkit/react';
 
 interface TaskBoardProps {
     taskGroups: TaskGroup[];
